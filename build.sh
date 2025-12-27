@@ -97,11 +97,19 @@ else
 fi
 
 # Check Wails dependencies (Linux only)
+WEBKIT_VERSION=""
 if [ "$PLATFORM" = "Linux" ]; then
     echo ""
     echo "Checking Linux dependencies for Wails..."
     if command_exists apt-get; then
-        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+        # Try 4.1 first (Ubuntu 22.04+), fallback to 4.0
+        if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
+            sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+            WEBKIT_VERSION="4.1"
+        else
+            sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+            WEBKIT_VERSION="4.0"
+        fi
     elif command_exists dnf; then
         sudo dnf install -y gtk3-devel webkit2gtk3-devel
     elif command_exists pacman; then
@@ -123,7 +131,12 @@ cd ..
 
 # Build the application
 echo "Building application..."
-wails build
+if [ "$WEBKIT_VERSION" = "4.1" ]; then
+    echo "       Using webkit2gtk-4.1 (Ubuntu 22.04+)"
+    wails build -tags webkit2_41
+else
+    wails build
+fi
 
 echo ""
 echo "============================================"
