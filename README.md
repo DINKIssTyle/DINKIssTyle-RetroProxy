@@ -3,6 +3,9 @@
 
 **DKST RetroProxy**는 최신 웹사이트를 구형 브라우저(Netscape Navigator, Internet Explorer 3~5 등)에서도 볼 수 있도록 변환해주는 프록시 서버 애플리케이션입니다.
 
+![DKST RetroProxy](img/DKST_RetroProxy_CNN_NC3_Image.png)
+![DKST RetroProxy](img/DKST_RetroProxy_Win_Main.png)
+
 최신 웹 기술(HTML5, CSS3, JS)로 만들어진 사이트를 Headless Browser 기술을 사용하여 렌더링한 뒤, 구형 브라우저가 이해할 수 있는 단순한 HTML 3.2/4.01 구조나 이미지 맵으로 변환하여 전달합니다.
 
 ---
@@ -10,6 +13,7 @@
 ## ✨ 주요 기능 (Features)
 
 ### 1. 렌더링 모드 (Rendering Modes)
+![DKST RetroProxy](img/DKST_RetroProxy_News_NC3_Html401.png)
 *   **HTML 3.2 / 4.01 모드**: 최신 웹 페이지의 DOM을 분석하여 테이블 기반 레이아웃의 단순한 HTML로 재구성합니다.
 *   **Text Only 모드**: 이미지와 복잡한 요소를 제거하고 텍스트와 링크만 남겨 텍스트 기반 브라우저(Lynx 등)나 초저사양 환경에 최적화합니다.
 *   **Image Map 모드**: 페이지 전체를 이미지로 캡처한 뒤, 클라이언트 측 이미지 맵(Image Map)을 생성하여 링크 클릭이 가능하도록 합니다. 간단한 텍스트 입력도 지원하여 검색창 등을 사용할 수 있습니다. 웹 표준을 지원하지 않는 아주 오래된 브라우저에서도 시각적으로 완벽한 페이지를 볼 수 있습니다. (대용량 페이지도 스크롤 캡처 지원)
@@ -21,6 +25,7 @@
 
 ### 3. 관리 및 디버그 (Management & Debug)
 *   **원격 관리 페이지**: 클라이언트 브라우저에서 `http://server`, `http://setting`, `http://settings`에 접속하여 설정을 변경하거나 서버를 종료할 수 있습니다.
+![DKST RetroProxy](img/DKST_RetroProxy_In_web_Settings.png)
 *   **디버그 툴바**: 변환된 페이지 상단에 원본 URL 확인 및 인코딩/모드 변경 툴바를 제공합니다.
 
 ---
