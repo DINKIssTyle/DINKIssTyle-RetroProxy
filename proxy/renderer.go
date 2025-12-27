@@ -1,8 +1,11 @@
+// Created by DINKIssTyle on 2025. Copyright (C) 2025 DINKI'ssTyle. All rights reserved.
+
 package proxy
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/stealth"
 )
 
 // Renderer uses a headless browser to render modern web pages
@@ -55,17 +59,20 @@ func (r *Renderer) RenderPage(url string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Create a new page for this request
-	page := r.browser.MustPage()
+	// Create a stealth page to bypass bot detection (Cloudflare, etc.)
+	page, err := stealth.Page(r.browser)
+	if err != nil {
+		return "", fmt.Errorf("failed to create stealth page: %w", err)
+	}
 	defer page.Close()
 
 	// Set a reasonable viewport
 	page.MustSetViewport(1280, 720, 1.0, false)
 
-	// Set timeout for page load - reduced to 15 seconds for faster response
-	page = page.Timeout(15 * time.Second)
+	// Set timeout for page load - increased to 30 seconds for Cloudflare challenges
+	page = page.Timeout(30 * time.Second)
 
-	// Hijack requests to block heavy resources
+	// Hijack requests to block heavy resources (but allow JS for Cloudflare challenge)
 	router := page.HijackRequests()
 	router.MustAdd("*", func(ctx *rod.Hijack) {
 		switch ctx.Request.Type() {
@@ -81,35 +88,71 @@ func (r *Renderer) RenderPage(url string) (string, error) {
 	go router.Run()
 
 	// Navigate to the URL
-	err := page.Navigate(url)
+	err = page.Navigate(url)
 	if err != nil {
 		return "", fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 
-	// Wait for DOM to be ready - faster than WaitLoad
-	// We only need the DOM structure, not full resources
+	// Wait for DOM to be ready
 	_ = page.WaitLoad()
 
-	// Wait a tiny bit for JS to settle, but not long
-	// Resource blocking should make this very fast
+	// Check for Cloudflare challenge and wait if needed
+	if r.isCloudflareChallenge(page) {
+		// Wait for Cloudflare challenge to complete (up to 10 seconds)
+		for i := 0; i < 20; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if !r.isCloudflareChallenge(page) {
+				break
+			}
+		}
+		// Wait a bit more for page to fully load after challenge
+		time.Sleep(1 * time.Second)
+		_ = page.WaitLoad()
+	}
+
+	// Wait for network idle
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		// Wait for network idle with very short timeout
-		page.WaitRequestIdle(300*time.Millisecond, nil, nil, nil)()
+		page.WaitRequestIdle(500*time.Millisecond, nil, nil, nil)()
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second): // Hard cap
+	case <-time.After(3 * time.Second): // Hard cap
 	}
 
-	// Get the rendered HTML - even if page didn't fully load
+	// Get the rendered HTML
 	html, err := page.HTML()
 	if err != nil {
 		return "", fmt.Errorf("failed to get HTML: %w", err)
 	}
 
 	return html, nil
+}
+
+// isCloudflareChallenge checks if the current page is a Cloudflare challenge
+func (r *Renderer) isCloudflareChallenge(page *rod.Page) bool {
+	html, err := page.HTML()
+	if err != nil {
+		return false
+	}
+	// Common Cloudflare challenge indicators
+	cfIndicators := []string{
+		"Just a moment...",
+		"Checking your browser",
+		"cf-browser-verification",
+		"cf_chl_opt",
+		"cloudflare",
+		"Verifying you are human",
+		"turnstile",
+	}
+	htmlLower := strings.ToLower(html)
+	for _, indicator := range cfIndicators {
+		if strings.Contains(htmlLower, strings.ToLower(indicator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // RenderPageWithScreenshot renders the page and captures a screenshot
@@ -121,18 +164,35 @@ func (r *Renderer) RenderPageWithScreenshot(url string) (string, []byte, error) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	page := r.browser.MustPage()
+	// Create a stealth page to bypass bot detection
+	page, err := stealth.Page(r.browser)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create stealth page: %w", err)
+	}
 	defer page.Close()
 
 	page.MustSetViewport(1280, 720, 1.0, false)
 	page = page.Timeout(30 * time.Second)
 
-	err := page.Navigate(url)
+	err = page.Navigate(url)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to navigate: %w", err)
 	}
 
 	page.WaitLoad()
+
+	// Check for Cloudflare challenge and wait if needed
+	if r.isCloudflareChallenge(page) {
+		for i := 0; i < 20; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if !r.isCloudflareChallenge(page) {
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+		page.WaitLoad()
+	}
+
 	time.Sleep(2 * time.Second)
 	page.WaitRequestIdle(time.Second, nil, nil, nil)()
 
@@ -188,9 +248,10 @@ func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	page, err := r.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+	// Create a stealth page to bypass bot detection
+	page, err := stealth.Page(r.browser)
 	if err != nil {
-		err = fmt.Errorf("failed to create page: %w", err)
+		err = fmt.Errorf("failed to create stealth page: %w", err)
 		return
 	}
 	defer page.Close()
@@ -211,6 +272,18 @@ func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error
 	if err = page.WaitLoad(); err != nil {
 		err = fmt.Errorf("failed to wait load: %w", err)
 		return
+	}
+
+	// Check for Cloudflare challenge and wait if needed
+	if r.isCloudflareChallenge(page) {
+		for i := 0; i < 20; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if !r.isCloudflareChallenge(page) {
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+		page.WaitLoad()
 	}
 
 	// Handle interaction if provided
