@@ -220,6 +220,7 @@ type HTMLVersionOption struct {
 // GetHTMLVersions returns available HTML versions
 func (s *Server) GetHTMLVersions() []HTMLVersionOption {
 	return []HTMLVersionOption{
+		{Value: "modern", Label: "Modern (No SSL)"},
 		{Value: "3.2", Label: "HTML 3.2 (Legacy, Table Layout)"},
 		{Value: "4.01", Label: "HTML 4.01 (Standard, Div Layout)"},
 		{Value: "text", Label: "Text Only (Fast, No Images)"},
@@ -233,6 +234,9 @@ func (s *Server) SetHTMLVersion(version string) {
 	defer s.mu.Unlock()
 
 	switch version {
+	case "modern":
+		s.proxyMode = "html"
+		s.simplifier = NewSimplifierPassthrough()
 	case "4.01":
 		s.proxyMode = "html"
 		s.simplifier = NewSimplifier401()
@@ -263,6 +267,8 @@ func (s *Server) GetCurrentHTMLVersion() string {
 
 	// Check type of s.simplifier
 	switch s.simplifier.(type) {
+	case *SimplifierPassthrough:
+		return "modern"
 	case *Simplifier401:
 		return "4.01"
 	default:
@@ -330,7 +336,8 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 			checkHost = h
 		}
 	}
-	if checkHost == "setting" || checkHost == "settings" || checkHost == "server" {
+	if checkHost == "setting" || checkHost == "settings" || checkHost == "server" ||
+		checkHost == "server.com" || checkHost == "www.server.com" {
 		s.handleManagementPage(w, r)
 		return
 	}
@@ -710,6 +717,7 @@ button:hover { background: #2563eb; }
 <div style="margin-top:10px;">
 <label style="font-size:12px;color:#9ca3af;margin-right:5px;">Mode:</label>
 <select name="mode" style="padding:8px;background:#1a1d23;color:#fff;border:1px solid #444;border-radius:6px;">
+<option value="modern">Modern (No SSL)</option>
 <option value="html">HTML 3.2 (Text Only / Standard)</option>
 <option value="html4">HTML 4.01 (Table Layout)</option>
 <option value="text">Text Only (Lynx Style)</option>
@@ -739,6 +747,7 @@ func (s *Server) generateDebugToolbarForView(currentURL string, stats string, mo
 
 	modeOptions := ""
 	modes := []struct{ V, L string }{
+		{"modern", "Modern (No SSL)"},
 		{"html", "HTML 3.2"},
 		{"html4", "HTML 4.01"},
 		{"text", "Text Only"},
@@ -856,6 +865,8 @@ func (s *Server) serveRetryPage(w http.ResponseWriter, targetURL string, message
 <p>The page will automatically reload in 5 seconds...</p>
 <br>
 <a href="%s"><button>Retry Now</button></a>
+&nbsp;
+<a href="http://server/"><button>Server Settings</button></a>
 <br><br>
 <font size="1">DKST RetroProxy</font>
 </center>
@@ -1278,6 +1289,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 </td></tr>
 <tr><td bgcolor="#efefef"><b>HTML Version</b></td><td>
 <select name="html">
+<option value="modern" %s>Modern (No SSL)</option>
 <option value="3.2" %s>HTML 3.2</option>
 <option value="4.01" %s>HTML 4.01</option>
 </select>
@@ -1310,7 +1322,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>`,
 		sel(currentEnc, "auto"), sel(currentEnc, "utf-8"), sel(currentEnc, "euc-kr"), sel(currentEnc, "cp949"), sel(currentEnc, "shift_jis"), sel(currentEnc, "iso-8859-1"),
-		sel(currentHTML, "3.2"), sel(currentHTML, "4.01"),
+		sel(currentHTML, "modern"), sel(currentHTML, "3.2"), sel(currentHTML, "4.01"),
 		sel(currentMode, "html"), sel(currentMode, "text"), sel(currentMode, "image"),
 		chk(currentDebug, "on"), chk(currentDebug, "off"))
 
