@@ -1162,7 +1162,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 	}
 	currentHTML := s.GetCurrentHTMLVersion()
 	currentDebug := s.debugMode
-	currentMode := s.proxyMode
+	currentImg := s.GetCurrentImageFormat()
 	s.mu.RUnlock()
 
 	if r.Method == "POST" {
@@ -1215,36 +1215,12 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/update" {
 			enc := r.FormValue("encoding")
 			htmlVer := r.FormValue("html")
-			imgMode := r.FormValue("image")
+			imgFmt := r.FormValue("imgfmt")
 			debug := r.FormValue("debug")
 
 			s.SetEncoding(enc)
-			s.SetHTMLVersion(htmlVer)
-			// SetImageMode? We have SetHTMLVersion handling modes?
-			// Wait, SetHTMLVersion handles "3.2", "401", "text", "image".
-			// If user selected "text" or "image", it's set via SetHTMLVersion in app logic.
-			// But here we split HTML version and Image Mode in UI?
-			// The previous UI had separate selects.
-			// But logic: SetHTMLVersion actually sets proxyMode too?
-			// Let's check SetHTMLVersion implementation.
-			// It sets s.proxyMode = version if version is "text" or "image".
-			// So we should combine them or handle them carefully.
-			// Implementation: Simple UI has "Encoding", "HTML", "Image", "Debug".
-			// If "Image" is "original", proxyMode="html".
-			// If "Image" is "text", proxyMode="text".
-			// If "Image" is "image", proxyMode="image".
-			// If proxyMode is "html", then HTML version applies.
-
-			// Logic mapping:
-			if imgMode == "text" {
-				s.SetHTMLVersion("text")
-			} else if imgMode == "image" {
-				s.SetHTMLVersion("image")
-			} else {
-				// imgMode == original/html
-				s.SetHTMLVersion(htmlVer) // This sets proxyMode="html" and simplifies
-			}
-
+			s.SetHTMLVersion(htmlVer) // Handles modern, 3.2, 4.01, text, image
+			s.SetImageFormat(imgFmt)  // Handles original, gif, jpeg, bmp
 			s.SetDebugMode(debug == "on")
 
 			http.Redirect(w, r, "/", http.StatusFound)
@@ -1279,7 +1255,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <table border="1" cellpadding="5" cellspacing="0">
 <tr><td bgcolor="#efefef"><b>Encoding</b></td><td>
 <select name="encoding">
-<option value="auto" %s>Auto Detect</option>
+<option value="auto" %s>Auto</option>
 <option value="utf-8" %s>UTF-8</option>
 <option value="euc-kr" %s>EUC-KR</option>
 <option value="cp949" %s>CP949</option>
@@ -1287,21 +1263,23 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <option value="iso-8859-1" %s>ISO-8859-1</option>
 </select>
 </td></tr>
-<tr><td bgcolor="#efefef"><b>HTML Version</b></td><td>
+<tr><td bgcolor="#efefef"><b>HTML</b></td><td>
 <select name="html">
 <option value="modern" %s>Modern (No SSL)</option>
-<option value="3.2" %s>HTML 3.2</option>
-<option value="4.01" %s>HTML 4.01</option>
-</select>
-</td></tr>
-<tr><td bgcolor="#efefef"><b>Render Mode</b></td><td>
-<select name="image">
-<option value="original" %s>Standard (HTML)</option>
+<option value="3.2" %s>HTML 3.2 (Legacy)</option>
+<option value="4.01" %s>HTML 4.01 (Standard)</option>
 <option value="text" %s>Text Only</option>
 <option value="image" %s>Image Map</option>
 </select>
 </td></tr>
-<tr><td bgcolor="#efefef"><b>Debug Mode</b></td><td>
+<tr><td bgcolor="#efefef"><b>Image</b></td><td>
+<select name="imgfmt">
+<option value="original" %s>Original</option>
+<option value="gif" %s>GIF</option>
+<option value="jpeg" %s>JPEG</option>
+</select>
+</td></tr>
+<tr><td bgcolor="#efefef"><b>Debug</b></td><td>
 <select name="debug">
 <option value="on" %s>On</option>
 <option value="off" %s>Off</option>
@@ -1322,8 +1300,8 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>`,
 		sel(currentEnc, "auto"), sel(currentEnc, "utf-8"), sel(currentEnc, "euc-kr"), sel(currentEnc, "cp949"), sel(currentEnc, "shift_jis"), sel(currentEnc, "iso-8859-1"),
-		sel(currentHTML, "modern"), sel(currentHTML, "3.2"), sel(currentHTML, "4.01"),
-		sel(currentMode, "html"), sel(currentMode, "text"), sel(currentMode, "image"),
+		sel(currentHTML, "modern"), sel(currentHTML, "3.2"), sel(currentHTML, "4.01"), sel(currentHTML, "text"), sel(currentHTML, "image"),
+		sel(currentImg, "original"), sel(currentImg, "gif"), sel(currentImg, "jpeg"),
 		chk(currentDebug, "on"), chk(currentDebug, "off"))
 
 	w.Write([]byte(html))
