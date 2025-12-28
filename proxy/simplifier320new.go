@@ -1,12 +1,15 @@
 // Created by DINKIssTyle on 2025. Copyright (C) 2025 DINKI'ssTyle. All rights reserved.
-
+// HTML 3.2 뉴모드 베타.. 구현 중
 package proxy
 
 import (
+	"bytes"
 	"fmt"
 	"net/url"
 	"sort"
 	"strings"
+
+	"golang.org/x/net/html"
 )
 
 // LayoutElement represents an element with its computed layout from the browser
@@ -17,12 +20,16 @@ type LayoutElement struct {
 	W        float64 `json:"w"`
 	H        float64 `json:"h"`
 	Text     string  `json:"text"`
+	HTML     string  `json:"html"` // New field for block content
 	Href     string  `json:"href"`
 	Src      string  `json:"src"`
 	Alt      string  `json:"alt"`
 	Hidden   bool    `json:"hidden"`
 	IsBlock  bool    `json:"isBlock"`
 	FontSize float64 `json:"fontSize"`
+	Color    string  `json:"color"`     // New computed style
+	BgColor  string  `json:"bgColor"`   // New computed style
+	Align    string  `json:"textAlign"` // New computed style
 }
 
 // LayoutBlock represents a grouped block of elements at similar Y position
@@ -227,6 +234,79 @@ func (s *Simplifier320New) renderSingleColumn(elements []LayoutElement, pageBase
 
 // renderElement converts a single LayoutElement to HTML 3.2
 func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, debugMode bool) string {
+	// 1. If we have raw HTML content (from block extraction), process it
+	if el.HTML != "" {
+		processed := s.processBlockHTML(el.HTML, pageBase, debugMode)
+		if processed == "" {
+			return ""
+		}
+
+		// Apply styles
+		var sb strings.Builder
+
+		// Align
+		align := ""
+		if strings.Contains(el.Align, "center") {
+			align = "center"
+		} else if strings.Contains(el.Align, "right") {
+			align = "right"
+		} else if strings.Contains(el.Align, "justify") {
+			align = "justify"
+		} else if strings.Contains(el.Align, "left") {
+			align = "left"
+		}
+
+		if align != "" {
+			sb.WriteString(fmt.Sprintf("<div align=\"%s\">", align))
+		} else {
+			sb.WriteString("<div>") // Always wrap in div for block behavior
+		}
+
+		// Font/Color
+		// Size mapping: 14px -> size 3, 18px -> size 4, 24px -> size 5, 32px -> size 6
+		size := "3" // Default
+		if el.FontSize >= 32 {
+			size = "6"
+		} else if el.FontSize >= 24 {
+			size = "5"
+		} else if el.FontSize >= 18 {
+			size = "4"
+		} else if el.FontSize <= 10 {
+			size = "2"
+		}
+
+		colorAttr := ""
+		if el.Color != "" && el.Color != "rgb(0, 0, 0)" && el.Color != "rgba(0, 0, 0, 0)" {
+			// Basic hex conversion (simplified) - assuming browser returns rgb(r, g, b)
+			// For robustness, skip complex parsing for now or use black
+			// Check if it's already hex
+			if strings.HasPrefix(el.Color, "#") {
+				colorAttr = fmt.Sprintf(" color=\"%s\"", el.Color)
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("<font size=\"%s\"%s>", size, colorAttr))
+
+		// BgColor (Table cell usually handles this, but here we can't easily. Skip for now or use Table?)
+		// If BgColor is distinct, maybe use a 1x1 table? Too heavy.
+
+		sb.WriteString(processed)
+		sb.WriteString("</font></div>\n")
+
+		result := sb.String()
+		if el.Href != "" {
+			href := s.resolveURL(el.Href, pageBase)
+			if debugMode && href != "" && !strings.HasPrefix(href, "#") && !strings.HasPrefix(href, "javascript:") && !strings.HasPrefix(href, "/_drp") {
+				href = "/debug?url=" + url.QueryEscape(href) + "&mode=3.2new"
+			}
+			// Wrap the entire block in an anchor
+			return fmt.Sprintf("<a href=\"%s\">%s</a>", href, result)
+		}
+
+		return result
+	}
+
+	// 2. Fallback for elements without HTML (e.g. standalone images found by secondary pass)
 	switch el.Tag {
 	case "img":
 		src := s.resolveURL(el.Src, pageBase)
@@ -236,62 +316,137 @@ func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, de
 		}
 		return fmt.Sprintf("<img src=\"%s\" alt=\"%s\" border=\"0\"><br>\n", src, alt)
 
-	case "a":
-		href := s.resolveURL(el.Href, pageBase)
-		if debugMode && href != "" && !strings.HasPrefix(href, "#") && !strings.HasPrefix(href, "javascript:") {
-			href = "/debug?url=" + url.QueryEscape(href) + "&mode=3.2new"
-		}
-		text := el.Text
-		if text == "" {
-			text = "[Link]"
-		}
-		return fmt.Sprintf("<a href=\"%s\">%s</a> ", href, text)
-
-	case "h1", "h2", "h3", "h4", "h5", "h6":
-		text := strings.TrimSpace(el.Text)
-		if text == "" {
-			return ""
-		}
-		// Map to appropriate heading size for HTML 3.2
-		size := "4"
-		switch el.Tag {
-		case "h1":
-			size = "6"
-		case "h2":
-			size = "5"
-		case "h3":
-			size = "4"
-		case "h4", "h5", "h6":
-			size = "3"
-		}
-		return fmt.Sprintf("<font size=\"%s\"><b>%s</b></font><br>\n", size, text)
-
 	case "hr":
 		return "<hr>\n"
 
-	case "li":
-		text := strings.TrimSpace(el.Text)
-		if text == "" {
-			return ""
-		}
-		return fmt.Sprintf("&bull; %s<br>\n", text)
-
 	default:
-		// Text content
+		// Text content fallback
 		text := strings.TrimSpace(el.Text)
 		if text == "" {
 			return ""
 		}
-
-		// Check if it looks like a heading (large font)
-		if el.FontSize >= 20 {
-			return fmt.Sprintf("<font size=\"4\"><b>%s</b></font><br>\n", text)
-		} else if el.FontSize >= 16 {
-			return fmt.Sprintf("<font size=\"3\"><b>%s</b></font><br>\n", text)
-		}
-
 		return fmt.Sprintf("%s<br>\n", text)
 	}
+}
+
+// processBlockHTML parses and sanitizes HTML for 3.2 compatibility
+func (s *Simplifier320New) processBlockHTML(rawHTML string, pageBase *url.URL, debugMode bool) string {
+	doc, err := html.Parse(strings.NewReader(rawHTML))
+	if err != nil {
+		return rawHTML // Fallback
+	}
+
+	var buf bytes.Buffer
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			buf.WriteString(n.Data)
+		} else if n.Type == html.ElementNode {
+			tag := n.Data
+
+			// Allowed tags
+			switch tag {
+			case "b", "strong":
+				buf.WriteString("<b>")
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					walk(c)
+				}
+				buf.WriteString("</b>")
+			case "i", "em":
+				buf.WriteString("<i>")
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					walk(c)
+				}
+				buf.WriteString("</i>")
+			case "u":
+				buf.WriteString("<u>")
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					walk(c)
+				}
+				buf.WriteString("</u>")
+			case "br":
+				buf.WriteString("<br>")
+			case "a":
+				href := ""
+				for _, a := range n.Attr {
+					if a.Key == "href" {
+						href = a.Val
+						break
+					}
+				}
+				if href != "" {
+					resolved := s.resolveURL(href, pageBase)
+					if debugMode && !strings.HasPrefix(resolved, "#") && !strings.HasPrefix(resolved, "javascript:") && !strings.HasPrefix(resolved, "/_drp") {
+						resolved = "/debug?url=" + url.QueryEscape(resolved) + "&mode=3.2new"
+					}
+					buf.WriteString(fmt.Sprintf("<a href=\"%s\">", resolved))
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						walk(c)
+					}
+					buf.WriteString("</a>")
+				} else {
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						walk(c)
+					}
+				}
+			case "img":
+				src := ""
+				alt := ""
+				for _, a := range n.Attr {
+					if a.Key == "src" {
+						src = a.Val
+					}
+					if a.Key == "alt" {
+						alt = a.Val
+					}
+				}
+				if src != "" {
+					resolved := s.resolveURL(src, pageBase)
+					buf.WriteString(fmt.Sprintf("<img src=\"%s\" alt=\"%s\" border=\"0\">", resolved, alt))
+				}
+			case "p", "div":
+				buf.WriteString("<br>")
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					walk(c)
+				}
+				buf.WriteString("<br>")
+			default:
+				// Strip tag, keep content
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					walk(c)
+				}
+			}
+		} else {
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				walk(c)
+			}
+		}
+	}
+
+	// Skip html/body/head wrapper from Parse
+	if doc.FirstChild != nil {
+		// html -> body -> ...
+		var body *html.Node
+		for c := doc.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.ElementNode && c.Data == "html" {
+				for gc := c.FirstChild; gc != nil; gc = gc.NextSibling {
+					if gc.Type == html.ElementNode && gc.Data == "body" {
+						body = gc
+						break
+					}
+				}
+			}
+		}
+		if body != nil {
+			for c := body.FirstChild; c != nil; c = c.NextSibling {
+				walk(c)
+			}
+		} else {
+			walk(doc)
+		}
+	}
+
+	return buf.String()
 }
 
 // resolveURL converts relative URLs to absolute and downgrades HTTPS
@@ -352,7 +507,7 @@ func (s *Simplifier320New) wrapHTML32(title, content, pageURL string, debugMode 
 	sb.WriteString(content)
 
 	sb.WriteString("\n<hr>\n")
-	sb.WriteString("<font size=\"1\">Rendered by DKST RetroProxy (HTML 3.2 New)</font>\n")
+	sb.WriteString(fmt.Sprintf("<font size=\"1\">%s (HTML 3.2 New)</font>\n", FooterText))
 	sb.WriteString("</body>\n</html>")
 
 	return sb.String()

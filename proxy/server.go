@@ -540,6 +540,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.Header.Get("User-Agent")
 	browserInfo := s.encoder.DetectLegacyBrowser(userAgent)
 
+	// Append Footer (Unified)
+	if strings.Contains(simplifiedHTML, "</body>") {
+		footer := fmt.Sprintf("\n<br><hr><center><font size=\"1\">%s</font></center>", FooterText)
+		simplifiedHTML = strings.Replace(simplifiedHTML, "</body>", footer+"</body>", 1)
+	}
+
 	var responseBytes []byte
 	var contentType string
 
@@ -972,6 +978,7 @@ func (s *Server) serveHomePage(w http.ResponseWriter) {
 <li><b>Proxy Address:</b> ` + s.getLocalIP() + `</li>
 <li><b>Port:</b> ` + fmt.Sprintf("%d", s.port) + `</li>
 </ul>
+
 <p>After setting up the proxy, just browse normally!</p>
 <hr>
 <h2>Test Links</h2>
@@ -979,10 +986,12 @@ func (s *Server) serveHomePage(w http.ResponseWriter) {
 <li><a href="http://example.com">http://example.com</a></li>
 <li><a href="http://info.cern.ch">http://info.cern.ch (First website)</a></li>
 </ul>
+<br><br>
+<center><font size="1">%s</font></center>
 </body>
 </html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+	w.Write([]byte(fmt.Sprintf(html, FooterText)))
 }
 
 // serveRetryPage shows a friendly error page that auto-refreshes
@@ -1004,10 +1013,10 @@ func (s *Server) serveRetryPage(w http.ResponseWriter, targetURL string, message
 &nbsp;
 <a href="http://server/"><button>Server Settings</button></a>
 <br><br>
-<font size="1">DKST RetroProxy</font>
+<font size="1">%s</font>
 </center>
 </body>
-</html>`, targetURL, message, targetURL)
+</html>`, targetURL, message, targetURL, FooterText)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	w.Write([]byte(html))
@@ -1258,6 +1267,7 @@ func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMod
 	}
 
 	sb.WriteString("</div>")
+	sb.WriteString(fmt.Sprintf("\n<br><hr><center><font size=\"1\">%s</font></center>", FooterText))
 	sb.WriteString("</body></html>")
 	return sb.String(), nil
 }
@@ -1389,25 +1399,25 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 	debugOpts := fmt.Sprintf(`<option value="on" %s>On</option><option value="off" %s>Off</option>`,
 		chk(currentDebug, "on"), chk(currentDebug, "off"))
 
-	html := `<html>
-<head><title>DKST RetroProxy</title></head>
+	html := fmt.Sprintf(`<html>
+<head><title>%s</title></head>
 <body bgcolor="#ffffff" text="#000000" link="#0000EE" vlink="#551A8B">
 <center>
-<h1>DKST RetroProxy</h1>
+<h1>%s</h1>
 <font size="2">Modern websites for legacy browsers</font><br><br>
 <form method="POST" action="/update">
 <table border="1" cellpadding="5" cellspacing="0">
 <tr><td bgcolor="#efefef"><b>Encoding</b></td><td>
-<select name="encoding">` + encOpts + `</select>
+<select name="encoding">`+encOpts+`</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>HTML</b></td><td>
-<select name="html">` + htmlOpts + `</select>
+<select name="html">`+htmlOpts+`</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>Image</b></td><td>
-<select name="imgfmt">` + imgOpts + `</select>
+<select name="imgfmt">`+imgOpts+`</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>Debug</b></td><td>
-<select name="debug">` + debugOpts + `</select>
+<select name="debug">`+debugOpts+`</select>
 </td></tr>
 </table>
 <br>
@@ -1419,10 +1429,10 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <input type="submit" name="act" value="Shutdown">
 </form>
 <br><br>
-<font size="1">(C) 2025 DINKI'ssTyle</font>
+<font size="1">%s</font>
 </center>
 </body>
-</html>`
+</html>`, AppName, AppName, CopyrightText)
 
 	w.Write([]byte(html))
 }
@@ -1591,6 +1601,7 @@ func (s *Server) handleInputAction(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("</map>")
 	}
 	sb.WriteString("</div>")
+	sb.WriteString(fmt.Sprintf("\n<br><hr><center><font size=\"1\">%s</font></center>", FooterText))
 	sb.WriteString("</body></html>")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

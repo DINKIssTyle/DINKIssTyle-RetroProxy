@@ -335,107 +335,94 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 	case <-time.After(3 * time.Second):
 	}
 
-	// Extract layout data using JavaScript
+	// Extract layout data using JavaScript (Block-based approach)
 	jsCode := `() => {
 		const result = [];
+		const uniqueElements = new Set();
 		
-		// 1. Text Node Extraction using TreeWalker
-		const walker = document.createTreeWalker(
-			document.body,
-			NodeFilter.SHOW_TEXT,
-			{
-				acceptNode: function(node) {
-					if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
-					// Check visibility of parent
-					const style = window.getComputedStyle(node.parentElement);
-					if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-						return NodeFilter.FILTER_REJECT;
-					}
-					return NodeFilter.FILTER_ACCEPT;
-				}
+		// Helper: Check if element is a block-level container
+		const isBlock = (el) => {
+			const style = window.getComputedStyle(el);
+			return (style.display === 'block' || style.display === 'flex' || style.display === 'grid' || style.display === 'table' || style.display === 'table-cell' || style.display === 'list-item' || style.display === 'article' || style.display === 'section' || style.display === 'header' || style.display === 'footer') 
+				   && style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none';
+		};
+
+		// Helper: Check if element contains any block-level children
+		const hasBlockChildren = (el) => {
+			for (let child of el.children) {
+				if (isBlock(child)) return true;
 			}
-		);
+			return false;
+		};
 
-		let node;
-		while (node = walker.nextNode()) {
-			const range = document.createRange();
-			range.selectNodeContents(node);
-			const rect = range.getBoundingClientRect();
+		// 1. Find Leaf Blocks (Blocks containing only inline content)
+		const allElements = document.body.querySelectorAll('*');
+		
+		allElements.forEach(el => {
+			if (!isBlock(el)) return;
 			
-			// Skip off-screen or empty rects
-			if (rect.width <= 0 || rect.height <= 0) continue;
-			if (rect.bottom < 0 || rect.top > window.innerHeight * 5) continue; // Scan more height
+			// We want "Leaf Blocks" - blocks that don't split deeply into other blocks.
+			// This keeps text paragraphs, lists, and headers intact.
+			if (hasBlockChildren(el)) return;
 
-			// Find closest block parent and link
-			let parent = node.parentElement;
+			// Filter out empty blocks
+			const text = el.innerText || el.textContent || '';
+			if (text.trim() === '' && !el.querySelector('img')) return;
+
+			const rect = el.getBoundingClientRect();
+			if (rect.width <= 0 || rect.height <= 0) return;
+			if (rect.bottom < 0 || rect.top > window.innerHeight * 10) return; // Limit scan height
+
+			const style = window.getComputedStyle(el);
+			
+			// Extract tag for semantic meaning
+			let tag = el.tagName.toLowerCase();
+			// Normalize generic blocks
+			if (!['h1','h2','h3','h4','h5','h6','li','p','pre'].includes(tag)) {
+				tag = 'div';
+			}
+
+			// Check if this block itself is a link or is inside a link
 			let href = '';
-			let tag = 'span'; // Default text wrapper
-			let fontSize = 14;
-			
-			// Traverse up to find link or header
-			let curr = parent;
-			let depth = 0;
-			while (curr && curr !== document.body && depth < 5) {
-				const currTag = curr.tagName.toLowerCase();
-				if (currTag === 'a' && curr.href) {
-					href = curr.href;
-				}
-				if (['h1','h2','h3','h4','h5','h6','li','th'].includes(currTag)) {
-					tag = currTag;
-				}
-				curr = curr.parentElement;
-				depth++;
+			const parentLink = el.closest('a');
+			if (el.tagName.toLowerCase() === 'a') {
+				href = el.href;
+			} else if (parentLink) {
+				href = parentLink.href;
 			}
-			
-			const style = window.getComputedStyle(parent);
-			fontSize = parseFloat(style.fontSize) || 14;
 
+			// Add to result
+			uniqueElements.add(el);
 			result.push({
 				tag: tag,
 				x: rect.x,
 				y: rect.y,
 				w: rect.width,
 				h: rect.height,
-				text: node.textContent.trim(),
+				text: el.innerText || el.textContent || '',
+				html: el.innerHTML,
 				href: href,
 				src: '',
 				alt: '',
 				hidden: false,
-				isBlock: false, // Text nodes are inline
-				fontSize: fontSize
-			});
-		}
-
-		// 2. Image Extraction
-		document.querySelectorAll('img').forEach(img => {
-			const rect = img.getBoundingClientRect();
-			const style = window.getComputedStyle(img);
-			
-			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
-			if (rect.width < 10 || rect.height < 10) return; // Skip tiny icons
-			if (rect.bottom < 0 || rect.top > window.innerHeight * 5) return;
-
-			let href = '';
-			if (img.parentElement && img.parentElement.tagName === 'A') {
-				href = img.parentElement.href;
-			}
-
-			result.push({
-				tag: 'img',
-				x: rect.x,
-				y: rect.y,
-				w: rect.width,
-				h: rect.height,
-				text: '',
-				href: href,
-				src: img.src || img.dataset.src || '',
-				alt: img.alt || '',
-				hidden: false,
 				isBlock: true,
-				fontSize: 0
+				fontSize: parseFloat(style.fontSize) || 14,
+				color: style.color,
+				bgColor: style.backgroundColor,
+				textAlign: style.textAlign
 			});
 		});
 
+		// 2. Rescue orphan images (images not inside the captured leaf blocks)
+		// Since we captured leaf blocks, most images inside them are "in the HTML".
+		// But images that ARE blocks themselves or direct children of rejected parents might be missed?
+		// Actually, if <img> is inline, it's inside a leaf block.
+		// If <img> is block (display: block), it is a leaf block itself (hasBlockChildren is false for img).
+		// So logic above covers images too!
+		// Just in case, let's explicitly look for 'img' tags that weren't captured?
+		// No, let's trust the logic first. If <img> is display:block, it's caught.
+		// If <img> is inline, it's inside a parent leaf block (caught).
+		
 		// 3. HR Extraction
 		document.querySelectorAll('hr').forEach(hr => {
 			const rect = hr.getBoundingClientRect();
@@ -447,12 +434,16 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 					w: rect.width,
 					h: rect.height,
 					text: '',
+					html: '',
 					href: '',
 					src: '',
 					alt: '',
 					hidden: false,
 					isBlock: true,
-					fontSize: 0
+					fontSize: 0,
+					color: '',
+					bgColor: '',
+					textAlign: ''
 				});
 			}
 		});
