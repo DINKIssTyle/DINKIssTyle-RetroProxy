@@ -5,6 +5,10 @@
   <img src="img/DKST_RetroProxy_CNN_NC3_Image.png">
 </p>
 
+<p align="center">
+  <a href="README.EN.MD">English</a> | <strong>[ Korean ]</strong>
+</p>
+
 
 **DKST RetroProxy**는 최신 웹사이트를 구형 브라우저(Netscape Navigator, Internet Explorer 3~5 등)에서도 볼 수 있도록 변환해주는 프록시 서버 애플리케이션입니다.
 
