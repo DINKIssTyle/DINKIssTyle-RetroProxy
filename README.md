@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="README.EN.MD">English</a> | <strong>[ Korean ]</strong>
+  <a href="README.EN.md">English</a> | <strong>[ Korean ]</strong>
 </p>
 
 
