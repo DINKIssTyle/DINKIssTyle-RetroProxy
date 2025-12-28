@@ -1,3 +1,4 @@
+// RendererPool manages a pool of Renderer instances for concurrent page rendering
 package main
 
 import (

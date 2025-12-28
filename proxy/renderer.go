@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,7 +62,7 @@ func (r *Renderer) ensureBrowser() error {
 }
 
 // RenderPage navigates to the URL and returns the rendered HTML
-func (r *Renderer) RenderPage(url string) (string, error) {
+func (r *Renderer) RenderPage(ctx context.Context, url string) (string, error) {
 	if err := r.ensureBrowser(); err != nil {
 		return "", fmt.Errorf("failed to start browser: %w", err)
 	}
@@ -74,7 +75,15 @@ func (r *Renderer) RenderPage(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create stealth page: %w", err)
 	}
-	defer page.Close()
+	// Use request context for cancellation
+	page = page.Context(ctx)
+	defer func() {
+		// Stop loading to save resources if cancelled
+		if ctx.Err() != nil {
+			page.StopLoading()
+		}
+		page.Close()
+	}()
 
 	// Set a reasonable viewport
 	page.MustSetViewport(1280, 720, 1.0, false)
@@ -110,7 +119,12 @@ func (r *Renderer) RenderPage(url string) (string, error) {
 	if r.isCloudflareChallenge(page) {
 		// Wait for Cloudflare challenge to complete (up to 10 seconds)
 		for i := 0; i < 20; i++ {
-			time.Sleep(500 * time.Millisecond)
+			// Check context before sleep
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
 			if !r.isCloudflareChallenge(page) {
 				break
 			}
@@ -127,11 +141,98 @@ func (r *Renderer) RenderPage(url string) (string, error) {
 		page.WaitRequestIdle(500*time.Millisecond, nil, nil, nil)()
 	}()
 	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
 	case <-done:
 	case <-time.After(3 * time.Second): // Hard cap
 	}
 
 	// Get the rendered HTML
+	html, err := page.HTML()
+	if err != nil {
+		return "", fmt.Errorf("failed to get HTML: %w", err)
+	}
+
+	return html, nil
+}
+
+// RenderPageFull navigates to the URL and returns the rendered HTML with CSS/JS intact
+// This is used for Modern mode where we want to preserve the layout
+func (r *Renderer) RenderPageFull(ctx context.Context, url string) (string, error) {
+	if err := r.ensureBrowser(); err != nil {
+		return "", fmt.Errorf("failed to start browser: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Create a stealth page
+	page, err := stealth.Page(r.browser)
+	if err != nil {
+		return "", fmt.Errorf("failed to create stealth page: %w", err)
+	}
+	// Use request context
+	page = page.Context(ctx)
+	defer func() {
+		if ctx.Err() != nil {
+			page.StopLoading()
+		}
+		page.Close()
+	}()
+
+	page.MustSetViewport(1280, 720, 1.0, false)
+	page = page.Timeout(30 * time.Second)
+
+	// Only block heavy resources (images/media), keep CSS/JS for layout
+	router := page.HijackRequests()
+	router.MustAdd("*", func(ctx *rod.Hijack) {
+		switch ctx.Request.Type() {
+		case proto.NetworkResourceTypeImage,
+			proto.NetworkResourceTypeMedia:
+			ctx.Response.Fail(proto.NetworkErrorReasonBlockedByClient)
+			return
+		}
+		ctx.ContinueRequest(&proto.FetchContinueRequest{})
+	})
+	go router.Run()
+
+	// Navigate
+	err = page.Navigate(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to navigate to %s: %w", url, err)
+	}
+
+	_ = page.WaitLoad()
+
+	// Check for Cloudflare and wait
+	if r.isCloudflareChallenge(page) {
+		for i := 0; i < 20; i++ {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+			if !r.isCloudflareChallenge(page) {
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+		_ = page.WaitLoad()
+	}
+
+	// Wait for network idle
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		page.WaitRequestIdle(500*time.Millisecond, nil, nil, nil)()
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
+
 	html, err := page.HTML()
 	if err != nil {
 		return "", fmt.Errorf("failed to get HTML: %w", err)
@@ -165,8 +266,232 @@ func (r *Renderer) isCloudflareChallenge(page *rod.Page) bool {
 	return false
 }
 
+// LayoutResult contains the extracted layout data and page title
+type LayoutResult struct {
+	Title    string
+	Elements []LayoutElement
+}
+
+// RenderPageWithLayout extracts layout data from rendered page for HTML 3.2 New mode
+func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*LayoutResult, error) {
+	if err := r.ensureBrowser(); err != nil {
+		return nil, fmt.Errorf("failed to start browser: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Create a stealth page
+	page, err := stealth.Page(r.browser)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stealth page: %w", err)
+	}
+	page = page.Context(ctx)
+	defer func() {
+		if ctx.Err() != nil {
+			page.StopLoading()
+		}
+		page.Close()
+	}()
+
+	// Set viewport
+	page.MustSetViewport(1280, 720, 1.0, false)
+	page = page.Timeout(30 * time.Second)
+
+	// Navigate
+	err = page.Navigate(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to navigate to %s: %w", url, err)
+	}
+
+	_ = page.WaitLoad()
+
+	// Check for Cloudflare and wait
+	if r.isCloudflareChallenge(page) {
+		for i := 0; i < 20; i++ {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+			if !r.isCloudflareChallenge(page) {
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+		_ = page.WaitLoad()
+	}
+
+	// Wait for network idle
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		page.WaitRequestIdle(500*time.Millisecond, nil, nil, nil)()
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
+
+	// Extract layout data using JavaScript
+	jsCode := `() => {
+		const result = [];
+		
+		// 1. Text Node Extraction using TreeWalker
+		const walker = document.createTreeWalker(
+			document.body,
+			NodeFilter.SHOW_TEXT,
+			{
+				acceptNode: function(node) {
+					if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT;
+					// Check visibility of parent
+					const style = window.getComputedStyle(node.parentElement);
+					if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+						return NodeFilter.FILTER_REJECT;
+					}
+					return NodeFilter.FILTER_ACCEPT;
+				}
+			}
+		);
+
+		let node;
+		while (node = walker.nextNode()) {
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			const rect = range.getBoundingClientRect();
+			
+			// Skip off-screen or empty rects
+			if (rect.width <= 0 || rect.height <= 0) continue;
+			if (rect.bottom < 0 || rect.top > window.innerHeight * 5) continue; // Scan more height
+
+			// Find closest block parent and link
+			let parent = node.parentElement;
+			let href = '';
+			let tag = 'span'; // Default text wrapper
+			let fontSize = 14;
+			
+			// Traverse up to find link or header
+			let curr = parent;
+			let depth = 0;
+			while (curr && curr !== document.body && depth < 5) {
+				const currTag = curr.tagName.toLowerCase();
+				if (currTag === 'a' && curr.href) {
+					href = curr.href;
+				}
+				if (['h1','h2','h3','h4','h5','h6','li','th'].includes(currTag)) {
+					tag = currTag;
+				}
+				curr = curr.parentElement;
+				depth++;
+			}
+			
+			const style = window.getComputedStyle(parent);
+			fontSize = parseFloat(style.fontSize) || 14;
+
+			result.push({
+				tag: tag,
+				x: rect.x,
+				y: rect.y,
+				w: rect.width,
+				h: rect.height,
+				text: node.textContent.trim(),
+				href: href,
+				src: '',
+				alt: '',
+				hidden: false,
+				isBlock: false, // Text nodes are inline
+				fontSize: fontSize
+			});
+		}
+
+		// 2. Image Extraction
+		document.querySelectorAll('img').forEach(img => {
+			const rect = img.getBoundingClientRect();
+			const style = window.getComputedStyle(img);
+			
+			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+			if (rect.width < 10 || rect.height < 10) return; // Skip tiny icons
+			if (rect.bottom < 0 || rect.top > window.innerHeight * 5) return;
+
+			let href = '';
+			if (img.parentElement && img.parentElement.tagName === 'A') {
+				href = img.parentElement.href;
+			}
+
+			result.push({
+				tag: 'img',
+				x: rect.x,
+				y: rect.y,
+				w: rect.width,
+				h: rect.height,
+				text: '',
+				href: href,
+				src: img.src || img.dataset.src || '',
+				alt: img.alt || '',
+				hidden: false,
+				isBlock: true,
+				fontSize: 0
+			});
+		});
+
+		// 3. HR Extraction
+		document.querySelectorAll('hr').forEach(hr => {
+			const rect = hr.getBoundingClientRect();
+			if (rect.width > 0) {
+				result.push({
+					tag: 'hr',
+					x: rect.x,
+					y: rect.y,
+					w: rect.width,
+					h: rect.height,
+					text: '',
+					href: '',
+					src: '',
+					alt: '',
+					hidden: false,
+					isBlock: true,
+					fontSize: 0
+				});
+			}
+		});
+
+		return {
+			title: document.title || 'Untitled',
+			elements: result
+		};
+	}`
+
+	var layoutResult struct {
+		Title    string          `json:"title"`
+		Elements []LayoutElement `json:"elements"`
+	}
+
+	// Use MustEval with panic recovery
+	var evalErr error
+	func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				evalErr = fmt.Errorf("JavaScript panic: %v", rec)
+			}
+		}()
+		result := page.MustEval(jsCode)
+		evalErr = result.Unmarshal(&layoutResult)
+	}()
+
+	if evalErr != nil {
+		return nil, fmt.Errorf("failed to extract layout: %w", evalErr)
+	}
+
+	return &LayoutResult{
+		Title:    layoutResult.Title,
+		Elements: layoutResult.Elements,
+	}, nil
+}
+
 // RenderPageWithScreenshot renders the page and captures a screenshot
-func (r *Renderer) RenderPageWithScreenshot(url string) (string, []byte, error) {
+func (r *Renderer) RenderPageWithScreenshot(ctx context.Context, url string) (string, []byte, error) {
 	if err := r.ensureBrowser(); err != nil {
 		return "", nil, fmt.Errorf("failed to start browser: %w", err)
 	}
@@ -179,7 +504,14 @@ func (r *Renderer) RenderPageWithScreenshot(url string) (string, []byte, error) 
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create stealth page: %w", err)
 	}
-	defer page.Close()
+	// Use request context
+	page = page.Context(ctx)
+	defer func() {
+		if ctx.Err() != nil {
+			page.StopLoading()
+		}
+		page.Close()
+	}()
 
 	page.MustSetViewport(1280, 720, 1.0, false)
 	page = page.Timeout(30 * time.Second)
@@ -194,7 +526,11 @@ func (r *Renderer) RenderPageWithScreenshot(url string) (string, []byte, error) 
 	// Check for Cloudflare challenge and wait if needed
 	if r.isCloudflareChallenge(page) {
 		for i := 0; i < 20; i++ {
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return "", nil, ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
 			if !r.isCloudflareChallenge(page) {
 				break
 			}
@@ -238,12 +574,12 @@ type InputRect struct {
 }
 
 // CaptureScreenshotAndLinks navigates to the URL, takes a full page screenshot, and extracts link coordinates
-func (r *Renderer) CaptureScreenshotAndLinks(urlStr string) ([]byte, []LinkRect, []InputRect, string, error) {
-	return r.captureLogic(urlStr, nil)
+func (r *Renderer) CaptureScreenshotAndLinks(ctx context.Context, urlStr string) ([]byte, []LinkRect, []InputRect, string, error) {
+	return r.captureLogic(ctx, urlStr, nil)
 }
 
 // Helper for capture logic to be reused by SubmitInput
-func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error) (imageData []byte, links []LinkRect, inputs []InputRect, currentURL string, err error) {
+func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction func(*rod.Page) error) (imageData []byte, links []LinkRect, inputs []InputRect, currentURL string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("panic in captureLogic: %v", rec)
@@ -264,7 +600,14 @@ func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error
 		err = fmt.Errorf("failed to create stealth page: %w", err)
 		return
 	}
-	defer page.Close()
+	// Use request context
+	page = page.Context(ctx)
+	defer func() {
+		if ctx.Err() != nil {
+			page.StopLoading()
+		}
+		page.Close()
+	}()
 
 	// Initial Viewport
 	if err = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{Width: 1024, Height: 768, DeviceScaleFactor: 1.0, Mobile: false}); err != nil {
@@ -287,7 +630,12 @@ func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error
 	// Check for Cloudflare challenge and wait if needed
 	if r.isCloudflareChallenge(page) {
 		for i := 0; i < 20; i++ {
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
 			if !r.isCloudflareChallenge(page) {
 				break
 			}
@@ -440,8 +788,9 @@ func (r *Renderer) captureLogic(urlStr string, interaction func(*rod.Page) error
 }
 
 // SubmitInput navigates to the page, inputs text, optionall presses enter, and captures the result
-func (r *Renderer) SubmitInput(urlStr, xpath, text string, doEnter bool) ([]byte, []LinkRect, []InputRect, string, error) {
-	return r.captureLogic(urlStr, func(page *rod.Page) error {
+// SubmitInput navigates to the page, inputs text, optionall presses enter, and captures the result
+func (r *Renderer) SubmitInput(ctx context.Context, urlStr, xpath, text string, doEnter bool) ([]byte, []LinkRect, []InputRect, string, error) {
+	return r.captureLogic(ctx, urlStr, func(page *rod.Page) error {
 		// Wait for element
 		// We use a small race free wait?
 		// xpath selector

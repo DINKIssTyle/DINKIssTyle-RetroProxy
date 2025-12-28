@@ -1,3 +1,4 @@
+// RendererPool manages a pool of Renderer instances for concurrent page rendering
 package proxy
 
 import (
@@ -222,6 +223,7 @@ func (s *Server) GetHTMLVersions() []HTMLVersionOption {
 	return []HTMLVersionOption{
 		{Value: "modern", Label: "Modern (No SSL)"},
 		{Value: "3.2", Label: "HTML 3.2 (Legacy, Table Layout)"},
+		{Value: "3.2new", Label: "HTML 3.2 New (Layout-based)"},
 		{Value: "4.01", Label: "HTML 4.01 (Standard, Div Layout)"},
 		{Value: "text", Label: "Text Only (Fast, No Images)"},
 		{Value: "image", Label: "Image Map (Full Render, Slow)"},
@@ -237,6 +239,9 @@ func (s *Server) SetHTMLVersion(version string) {
 	case "modern":
 		s.proxyMode = "html"
 		s.simplifier = NewSimplifierPassthrough()
+	case "3.2new":
+		s.proxyMode = "layout"
+		s.simplifier = NewSimplifier320New()
 	case "4.01":
 		s.proxyMode = "html"
 		s.simplifier = NewSimplifier401()
@@ -264,11 +269,16 @@ func (s *Server) GetCurrentHTMLVersion() string {
 	if s.proxyMode == "text" {
 		return "text"
 	}
+	if s.proxyMode == "layout" {
+		return "3.2new"
+	}
 
 	// Check type of s.simplifier
 	switch s.simplifier.(type) {
 	case *SimplifierPassthrough:
 		return "modern"
+	case *Simplifier320New:
+		return "3.2new"
 	case *Simplifier401:
 		return "4.01"
 	default:
@@ -294,28 +304,12 @@ func (s *Server) getEncodingOptions() string {
 	if current == "" {
 		current = "auto"
 	}
-	opts := ""
-	for _, e := range s.encoder.GetAvailableEncodings() {
-		sel := ""
-		if e.Value == current {
-			sel = " selected"
-		}
-		opts += `<option value="` + e.Value + `"` + sel + `>` + e.Label + `</option>`
-	}
-	return opts
+	return GenerateOptionsHTML(AvailableEncodings, current)
 }
 
 func (s *Server) getImageOptions() string {
 	current := s.imageConverter.GetFormat()
-	opts := ""
-	for _, f := range s.imageConverter.GetAvailableFormats() {
-		sel := ""
-		if f.Value == current {
-			sel = " selected"
-		}
-		opts += `<option value="` + f.Value + `"` + sel + `>` + f.Label + `</option>`
-	}
-	return opts
+	return GenerateOptionsHTML(AvailableImageFormats, current)
 }
 
 // handleProxy handles incoming proxy requests
@@ -378,6 +372,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle Test Logic - /_drp/test/retry
+	if strings.HasPrefix(r.URL.Path, "/_drp/test/retry") {
+		s.serveRetryPage(w, "/debug", "This is a test of the Busy/Retry page.")
+		return
+	}
+
 	// Get the target URL
 	var targetURL string
 
@@ -434,11 +434,11 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var html string
 
 	if mode == "image" {
-		html, err = s.renderImageMode(targetURL, false)
+		html, err = s.renderImageMode(r.Context(), targetURL, false)
 		if err != nil {
 			// Check if renderer is busy
-			if errors.Is(err, ErrRendererBusy) {
-				s.serveRetryPage(w, targetURL, "The server is currently busy processing another page.")
+			if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
 				return
 			}
 			s.serveRetryPage(w, targetURL, fmt.Sprintf("Image Render Failed: %v", err))
@@ -450,9 +450,56 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Layout Mode (HTML 3.2 New)
+	if mode == "layout" {
+		layoutResult, err := s.rendererPool.RenderPageWithLayout(r.Context(), targetURL)
+		if err != nil {
+			if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+				return
+			}
+			s.serveRetryPage(w, targetURL, fmt.Sprintf("Layout extraction failed: %v", err))
+			return
+		}
+
+		// Convert layout to HTML 3.2
+		simplifier := NewSimplifier320New()
+		html = simplifier.SimplifyFromLayout(layoutResult.Elements, targetURL, layoutResult.Title, false)
+
+		// Detect legacy browser and convert encoding if needed
+		userAgent := r.Header.Get("User-Agent")
+		browserInfo := s.encoder.DetectLegacyBrowser(userAgent)
+
+		var responseBytes []byte
+		var contentType string
+
+		if browserInfo.IsLegacy {
+			responseBytes, _ = s.encoder.ConvertToEncoding(html, browserInfo.Encoding)
+			contentType = "text/html; charset=" + browserInfo.Encoding
+		} else {
+			responseBytes = []byte(html)
+			contentType = "text/html; charset=utf-8"
+		}
+
+		w.Header().Set("Content-Type", contentType)
+		w.Write(responseBytes)
+		return
+	}
+
 	// Normal HTML Mode (or Text Mode)
-	// For HTTP URLs, we can also render them for consistency
-	html, err = s.rendererPool.RenderPage(targetURL)
+	// Check if we're in Modern mode (need CSS/JS intact)
+	s.mu.RLock()
+	_, isModern := s.simplifier.(*SimplifierPassthrough)
+	s.mu.RUnlock()
+
+	if isModern {
+		// Modern mode: use full rendering with CSS/JS
+		html, err = s.rendererPool.RenderPageFull(r.Context(), targetURL)
+	} else {
+		// Other HTML modes: block CSS for faster loading
+		html, err = s.rendererPool.RenderPage(r.Context(), targetURL)
+	}
+
 	if err != nil {
 		// Check if renderer is busy
 		if errors.Is(err, ErrRendererBusy) {
@@ -515,6 +562,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDebugAPI(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	redirectURL := query.Get("url")
+	nextURL := query.Get("next")
 
 	// Update settings based on query parameters
 	if enc := query.Get("enc"); enc != "" {
@@ -526,9 +574,11 @@ func (s *Server) handleDebugAPI(w http.ResponseWriter, r *http.Request) {
 		s.log("Debug: Image format set to " + img)
 	}
 
-	// Redirect back to the original URL
+	// Redirect back to the original URL or next page
 	if redirectURL != "" {
 		http.Redirect(w, r, "/_drp/view?url="+url.QueryEscape(redirectURL), http.StatusFound)
+	} else if nextURL != "" {
+		http.Redirect(w, r, nextURL, http.StatusFound)
 	} else {
 		w.Write([]byte("Settings updated"))
 	}
@@ -563,9 +613,13 @@ func (s *Server) handleDebugView(w http.ResponseWriter, r *http.Request) {
 	if mode == "image" {
 		// Image Map Mode
 		renderStart := time.Now()
-		html, err = s.renderImageMode(targetURL, true)
+		html, err = s.renderImageMode(r.Context(), targetURL, true)
 		duration := time.Since(renderStart)
 		if err != nil {
+			if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+				return
+			}
 			http.Error(w, fmt.Sprintf("Failed to render image mode: %v", err), http.StatusBadGateway)
 			return
 		}
@@ -573,12 +627,61 @@ func (s *Server) handleDebugView(w http.ResponseWriter, r *http.Request) {
 		// Note: No simplification needed for image mode as it returns fresh HTML
 		// But we need to inject the toolbar.
 		// simplifiedHTML is just html here.
+	} else if mode == "3.2new" {
+		// HTML 3.2 New (Layout-based) Mode
+		renderStart := time.Now()
+		layoutResult, renderErr := s.rendererPool.RenderPageWithLayout(r.Context(), targetURL)
+		renderDuration := time.Since(renderStart)
+		if renderErr != nil {
+			if errors.Is(renderErr, ErrRendererBusy) || errors.Is(renderErr, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+				return
+			}
+			http.Error(w, fmt.Sprintf("Failed to extract layout: %v", renderErr), http.StatusBadGateway)
+			return
+		}
+
+		simplifyStart := time.Now()
+		simplifier := NewSimplifier320New()
+		html = simplifier.SimplifyFromLayout(layoutResult.Elements, targetURL, layoutResult.Title, true)
+		simplifyDuration := time.Since(simplifyStart)
+		totalDuration := time.Since(start)
+		stats = fmt.Sprintf("Render: %v, Simplify: %v, Total: %v", renderDuration.Round(time.Millisecond), simplifyDuration.Round(time.Millisecond), totalDuration.Round(time.Millisecond))
+	} else if mode == "modern" {
+		// Modern (No SSL) Mode - use RenderPageFull to keep CSS/JS
+		renderStart := time.Now()
+		renderHTML, renderErr := s.rendererPool.RenderPageFull(r.Context(), targetURL)
+		renderDuration := time.Since(renderStart)
+		if renderErr != nil {
+			if errors.Is(renderErr, ErrRendererBusy) || errors.Is(renderErr, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+				return
+			}
+			http.Error(w, fmt.Sprintf("Failed to render: %v", renderErr), http.StatusBadGateway)
+			return
+		}
+
+		simplifyStart := time.Now()
+		simplifier := NewSimplifierPassthrough()
+		simplifiedHTML, simplifyErr := simplifier.Simplify(renderHTML, targetURL, true)
+		simplifyDuration := time.Since(simplifyStart)
+		if simplifyErr != nil {
+			http.Error(w, fmt.Sprintf("Failed to simplify: %v", simplifyErr), http.StatusInternalServerError)
+			return
+		}
+		html = simplifiedHTML
+		totalDuration := time.Since(start)
+		stats = fmt.Sprintf("Render: %v, Simplify: %v, Total: %v", renderDuration.Round(time.Millisecond), simplifyDuration.Round(time.Millisecond), totalDuration.Round(time.Millisecond))
 	} else {
 		// Standard HTML 3.2 Mode
 		renderStart := time.Now()
-		renderHTML, renderErr := s.rendererPool.RenderPage(targetURL)
+		renderHTML, renderErr := s.rendererPool.RenderPage(r.Context(), targetURL)
 		renderDuration := time.Since(renderStart)
 		if renderErr != nil {
+			if errors.Is(renderErr, ErrRendererBusy) || errors.Is(renderErr, context.Canceled) {
+				s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+				return
+			}
 			http.Error(w, fmt.Sprintf("Failed to render: %v", renderErr), http.StatusBadGateway)
 			return
 		}
@@ -695,42 +798,84 @@ func (s *Server) serveDebugHomePage(w http.ResponseWriter) {
 <head>
 <title>DKST RetroProxy - Debug Viewer</title>
 <style>
-body { font-family: Arial, sans-serif; background: #1a1d23; color: #fff; margin: 0; padding: 40px; }
+body { font-family: 'Segoe UI', sans-serif; background: #1a1d23; color: #fff; margin: 0; padding: 40px; }
 .container { max-width: 800px; margin: 0 auto; }
-h1 { color: #3b82f6; }
-.form { background: #2d323a; padding: 20px; border-radius: 10px; margin-top: 20px; }
-input[type="text"] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #444; border-radius: 6px; background: #1a1d23; color: #fff; box-sizing: border-box; }
-button { padding: 12px 30px; font-size: 16px; background: #3b82f6; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+h1 { color: #3b82f6; font-weight: 300; margin-bottom: 10px; }
+.form { background: #2d323a; padding: 30px; border-radius: 12px; margin-top: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+input[type="text"] { width: 100%; padding: 15px; font-size: 16px; border: 1px solid #444; border-radius: 8px; background: #1a1d23; color: #fff; box-sizing: border-box; transition: border-color 0.2s; }
+input[type="text"]:focus { border-color: #3b82f6; outline: none; }
+button { padding: 12px 30px; font-size: 16px; background: #3b82f6; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; font-weight: 600; transition: background 0.2s; }
 button:hover { background: #2563eb; }
-.settings { margin-top: 20px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-.settings select { padding: 8px; background: #1a1d23; color: #fff; border: 1px solid #444; border-radius: 6px; }
-.settings label { font-size: 12px; color: #9ca3af; }
+.settings { margin-top: 25px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+.settings select { width: 100%; padding: 10px; background: #1a1d23; color: #fff; border: 1px solid #444; border-radius: 8px; font-size: 14px; }
+.settings label { font-size: 13px; color: #9ca3af; display: block; margin-bottom: 5px; font-weight: 500; }
+.internal-links { margin-top: 40px; border-top: 1px solid #374151; padding-top: 30px; }
+.internal-links h3 { font-size: 18px; color: #e5e7eb; margin-bottom: 15px; font-weight: 600; }
+.internal-links ul { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.internal-links li { margin-bottom: 0; background: #2d323a; border-radius: 8px; padding: 12px 15px; border: 1px solid #374151; transition: border-color 0.2s; }
+.internal-links li:hover { border-color: #4b5563; }
+.internal-links a { color: #60a5fa; text-decoration: none; font-weight: 500; display: block; }
+.internal-links a:hover { text-decoration: underline; }
+.internal-links small { color: #9ca3af; display: block; font-size: 0.85em; margin-top: 2px; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #22c55e; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 </style>
+<script>
+function updateSetting(key, value) {
+	fetch('/_drp/set?' + key + '=' + value)
+		.then(() => {
+			const toast = document.getElementById('toast');
+			toast.style.opacity = '1';
+			setTimeout(() => toast.style.opacity = '0', 2000);
+		})
+		.catch(console.error);
+}
+</script>
 </head>
 <body>
 <div class="container">
-<h1>🌐 DKST RetroProxy - Debug Viewer</h1>
-<p>Enter a URL to view how it will be converted by RetroProxy.</p>
+<h1>🌐 DKST RetroProxy</h1>
+<p style="color:#9ca3af;">Enter a URL to view how it will be converted by RetroProxy.</p>
+
 <div class="form">
-<form action="/debug" method="get">
-<input type="text" name="url" placeholder="https://example.com" autofocus>
-<div style="margin-top:10px;">
-<label style="font-size:12px;color:#9ca3af;margin-right:5px;">Mode:</label>
-<select name="mode" style="padding:8px;background:#1a1d23;color:#fff;border:1px solid #444;border-radius:6px;">
-<option value="modern">Modern (No SSL)</option>
-<option value="html">HTML 3.2 (Text Only / Standard)</option>
-<option value="html4">HTML 4.01 (Table Layout)</option>
-<option value="text">Text Only (Lynx Style)</option>
-<option value="image">Image Map (Full Render)</option>
-</select>
+	<form action="/debug" method="get">
+		<input type="text" name="url" placeholder="https://example.com" autofocus>
+		
+		<div class="settings">
+			<div>
+				<label>Mode</label>
+				<select name="mode">
+					` + GenerateOptionsHTML(AvailableHTMLModes, "modern") + `
+				</select>
+			</div>
+			<div>
+				<label>Encoding (Global)</label>
+				<select onchange="updateSetting('enc', this.value)">
+					` + GenerateOptionsHTML(AvailableEncodings, "") + `
+				</select>
+			</div>
+			<div>
+				<label>Image Format (Global)</label>
+				<select onchange="updateSetting('img', this.value)">
+					` + GenerateOptionsHTML(AvailableImageFormats, "") + `
+				</select>
+			</div>
+		</div>
+		
+		<button type="submit">View Page</button>
+	</form>
 </div>
-<button type="submit">View Page</button>
-</form>
-<div class="settings">
-<div><label>Encoding</label><select onchange="location.href='/_drp/set?enc='+this.value">` + s.getEncodingOptions() + `</select></div>
-<div><label>Image</label><select onchange="location.href='/_drp/set?img='+this.value">` + s.getImageOptions() + `</select></div>
+
+<div class="internal-links">
+	<h3>📌 Internal Pages Index</h3>
+	` + GenerateLinkListHTML(InternalPages) + `
 </div>
+
+<div id="toast" class="toast">Settings Saved</div>
+
+<div style="margin-top:20px; color:#6b7280; font-size:12px; text-align:center;">
+	DKST RetroProxy v2.0 - Debug Console
 </div>
+
 </div>
 </body>
 </html>`
@@ -745,21 +890,12 @@ func (s *Server) generateDebugToolbarForView(currentURL string, stats string, mo
 		modeParam = "&mode=" + mode
 	}
 
-	modeOptions := ""
-	modes := []struct{ V, L string }{
-		{"modern", "Modern (No SSL)"},
-		{"html", "HTML 3.2"},
-		{"html4", "HTML 4.01"},
-		{"text", "Text Only"},
-		{"image", "Image Map"},
+	// Determine selected mode for UI (default to html if empty)
+	selectedMode := mode
+	if selectedMode == "" {
+		selectedMode = "html"
 	}
-	for _, m := range modes {
-		sel := ""
-		if mode == m.V || (mode == "" && m.V == "html") {
-			sel = " selected"
-		}
-		modeOptions += fmt.Sprintf(`<option value="%s"%s>%s</option>`, m.V, sel, m.L)
-	}
+	modeOptions := GenerateOptionsHTML(AvailableHTMLModes, selectedMode)
 
 	return `<div id="owp-debug-toolbar" style="position:fixed;top:0;left:0;right:0;z-index:999999;background:#1a1d23;color:#fff;padding:8px 15px;font-family:Arial,sans-serif;font-size:12px;display:flex;gap:10px;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,0.5);">
 <a href="/debug" style="font-weight:bold;color:#3b82f6;text-decoration:none;">🌐 DKST RetroProxy</a>
@@ -980,7 +1116,7 @@ func (s *Server) Close() error {
 }
 
 // renderImageMode captures screenshot, slices it, and returns HTML with image map
-func (s *Server) renderImageMode(targetURL string, debugMode bool) (html string, err error) {
+func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMode bool) (html string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			s.log(fmt.Sprintf("Panic in renderImageMode: %v", rec))
@@ -989,7 +1125,7 @@ func (s *Server) renderImageMode(targetURL string, debugMode bool) (html string,
 	}()
 
 	// Capture full page screenshot directly (returns []byte now)
-	imageData, links, inputs, _, err := s.rendererPool.CaptureScreenshotAndLinks(targetURL)
+	imageData, links, inputs, _, err := s.rendererPool.CaptureScreenshotAndLinks(ctx, targetURL)
 	if err != nil {
 		s.log(fmt.Sprintf("Error capturing screenshot: %v", err))
 		return "", err
@@ -1023,6 +1159,11 @@ func (s *Server) renderImageMode(targetURL string, debugMode bool) (html string,
 
 	// Render Image Tiles
 	sb.WriteString(`<div align="center">`)
+
+	// Add fixed refresh button
+	sb.WriteString(`<div style="position:fixed;top:5px;left:5px;z-index:9999;">
+		<button onclick="window.location.reload()" style="font-size:12px;cursor:pointer;background:#eee;border:1px solid #999;">Refresh View</button>
+	</div>`)
 
 	for i, tile := range tiles {
 		imgSrc := fmt.Sprintf("/_drp/tile/%s/%d", uuid, i)
@@ -1232,12 +1373,12 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	// Helper for selected
-	sel := func(curr, val string) string {
-		if curr == val {
-			return "selected"
-		}
-		return ""
-	}
+	// Generate Options
+	encOpts := GenerateOptionsHTML(AvailableEncodings, currentEnc)
+	htmlOpts := GenerateOptionsHTML(AvailableHTMLModes, currentHTML)
+	imgOpts := GenerateOptionsHTML(AvailableImageFormats, currentImg)
+
+	// Helper for check
 	chk := func(curr bool, val string) string {
 		if (curr && val == "on") || (!curr && val == "off") {
 			return "selected"
@@ -1245,7 +1386,10 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 		return ""
 	}
 
-	html := fmt.Sprintf(`<html>
+	debugOpts := fmt.Sprintf(`<option value="on" %s>On</option><option value="off" %s>Off</option>`,
+		chk(currentDebug, "on"), chk(currentDebug, "off"))
+
+	html := `<html>
 <head><title>DKST RetroProxy</title></head>
 <body bgcolor="#ffffff" text="#000000" link="#0000EE" vlink="#551A8B">
 <center>
@@ -1254,42 +1398,22 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <form method="POST" action="/update">
 <table border="1" cellpadding="5" cellspacing="0">
 <tr><td bgcolor="#efefef"><b>Encoding</b></td><td>
-<select name="encoding">
-<option value="auto" %s>Auto</option>
-<option value="utf-8" %s>UTF-8</option>
-<option value="euc-kr" %s>EUC-KR</option>
-<option value="cp949" %s>CP949</option>
-<option value="shift_jis" %s>Shift_JIS</option>
-<option value="iso-8859-1" %s>ISO-8859-1</option>
-</select>
+<select name="encoding">` + encOpts + `</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>HTML</b></td><td>
-<select name="html">
-<option value="modern" %s>Modern (No SSL)</option>
-<option value="3.2" %s>HTML 3.2 (Legacy)</option>
-<option value="4.01" %s>HTML 4.01 (Standard)</option>
-<option value="text" %s>Text Only</option>
-<option value="image" %s>Image Map</option>
-</select>
+<select name="html">` + htmlOpts + `</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>Image</b></td><td>
-<select name="imgfmt">
-<option value="original" %s>Original</option>
-<option value="gif" %s>GIF</option>
-<option value="jpeg" %s>JPEG</option>
-</select>
+<select name="imgfmt">` + imgOpts + `</select>
 </td></tr>
 <tr><td bgcolor="#efefef"><b>Debug</b></td><td>
-<select name="debug">
-<option value="on" %s>On</option>
-<option value="off" %s>Off</option>
-</select>
+<select name="debug">` + debugOpts + `</select>
 </td></tr>
 </table>
 <br>
 <input type="submit" value="Save Settings">
 </form>
-<br><hr width="50%%"><br>
+<br><hr width="50%"><br>
 <form method="POST" action="/action">
 <input type="submit" name="act" value="Restart"> &nbsp;
 <input type="submit" name="act" value="Shutdown">
@@ -1298,11 +1422,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <font size="1">(C) 2025 DINKI'ssTyle</font>
 </center>
 </body>
-</html>`,
-		sel(currentEnc, "auto"), sel(currentEnc, "utf-8"), sel(currentEnc, "euc-kr"), sel(currentEnc, "cp949"), sel(currentEnc, "shift_jis"), sel(currentEnc, "iso-8859-1"),
-		sel(currentHTML, "modern"), sel(currentHTML, "3.2"), sel(currentHTML, "4.01"), sel(currentHTML, "text"), sel(currentHTML, "image"),
-		sel(currentImg, "original"), sel(currentImg, "gif"), sel(currentImg, "jpeg"),
-		chk(currentDebug, "on"), chk(currentDebug, "off"))
+</html>`
 
 	w.Write([]byte(html))
 }
@@ -1368,8 +1488,12 @@ func (s *Server) handleInputAction(w http.ResponseWriter, r *http.Request) {
 	doEnter := (action == "Input & Enter")
 
 	// Perform interaction via renderer pool
-	imageData, links, inputs, newURL, err := s.rendererPool.SubmitInput(targetURL, xpath, text, doEnter)
+	imageData, links, inputs, newURL, err := s.rendererPool.SubmitInput(r.Context(), targetURL, xpath, text, doEnter)
 	if err != nil {
+		if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
+			s.serveRetryPage(w, targetURL, "The server prevents duplicate heavy tasks. Please try again.")
+			return
+		}
 		http.Error(w, fmt.Sprintf("Interaction failed: %v", err), http.StatusInternalServerError)
 		return
 	}

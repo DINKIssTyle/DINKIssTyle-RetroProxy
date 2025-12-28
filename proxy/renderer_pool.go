@@ -3,6 +3,7 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -35,8 +36,8 @@ func NewRendererPool(size int) *RendererPool {
 	return pool
 }
 
-// acquire gets a renderer from the pool with timeout
-func (p *RendererPool) acquire(timeout time.Duration) (*Renderer, error) {
+// acquire gets a renderer from the pool with timeout or context cancellation
+func (p *RendererPool) acquire(ctx context.Context, timeout time.Duration) (*Renderer, error) {
 	p.mu.RLock()
 	if p.closed {
 		p.mu.RUnlock()
@@ -47,6 +48,8 @@ func (p *RendererPool) acquire(timeout time.Duration) (*Renderer, error) {
 	select {
 	case renderer := <-p.renderers:
 		return renderer, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-time.After(timeout):
 		return nil, ErrRendererBusy
 	}
@@ -72,47 +75,69 @@ func (p *RendererPool) release(renderer *Renderer) {
 }
 
 // RenderPage renders a page using an available renderer from the pool
-func (p *RendererPool) RenderPage(url string) (string, error) {
-	renderer, err := p.acquire(30 * time.Second)
+func (p *RendererPool) RenderPage(ctx context.Context, url string) (string, error) {
+	renderer, err := p.acquire(ctx, 30*time.Second)
 	if err != nil {
 		return "", err
 	}
 	defer p.release(renderer)
 
-	return renderer.RenderPage(url)
+	return renderer.RenderPage(ctx, url)
+}
+
+// RenderPageFull renders a page with CSS/JS intact (for Modern mode)
+func (p *RendererPool) RenderPageFull(ctx context.Context, url string) (string, error) {
+	renderer, err := p.acquire(ctx, 30*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer p.release(renderer)
+
+	return renderer.RenderPageFull(ctx, url)
 }
 
 // RenderPageWithScreenshot renders a page and captures screenshot
-func (p *RendererPool) RenderPageWithScreenshot(url string) (string, []byte, error) {
-	renderer, err := p.acquire(30 * time.Second)
+func (p *RendererPool) RenderPageWithScreenshot(ctx context.Context, url string) (string, []byte, error) {
+	renderer, err := p.acquire(ctx, 30*time.Second)
 	if err != nil {
 		return "", nil, err
 	}
 	defer p.release(renderer)
 
-	return renderer.RenderPageWithScreenshot(url)
+	return renderer.RenderPageWithScreenshot(ctx, url)
 }
 
 // CaptureScreenshotAndLinks captures full page screenshot with link coordinates
-func (p *RendererPool) CaptureScreenshotAndLinks(url string) ([]byte, []LinkRect, []InputRect, string, error) {
-	renderer, err := p.acquire(60 * time.Second) // Longer timeout for screenshots
+func (p *RendererPool) CaptureScreenshotAndLinks(ctx context.Context, url string) ([]byte, []LinkRect, []InputRect, string, error) {
+	renderer, err := p.acquire(ctx, 60*time.Second) // Longer timeout for screenshots
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
 	defer p.release(renderer)
 
-	return renderer.CaptureScreenshotAndLinks(url)
+	return renderer.CaptureScreenshotAndLinks(ctx, url)
 }
 
 // SubmitInput submits input to a form field and captures the result
-func (p *RendererPool) SubmitInput(urlStr, xpath, text string, doEnter bool) ([]byte, []LinkRect, []InputRect, string, error) {
-	renderer, err := p.acquire(60 * time.Second)
+func (p *RendererPool) SubmitInput(ctx context.Context, urlStr, xpath, text string, doEnter bool) ([]byte, []LinkRect, []InputRect, string, error) {
+	renderer, err := p.acquire(ctx, 60*time.Second)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
 	defer p.release(renderer)
 
-	return renderer.SubmitInput(urlStr, xpath, text, doEnter)
+	return renderer.SubmitInput(ctx, urlStr, xpath, text, doEnter)
+}
+
+// RenderPageWithLayout extracts layout data for HTML 3.2 New mode
+func (p *RendererPool) RenderPageWithLayout(ctx context.Context, url string) (*LayoutResult, error) {
+	renderer, err := p.acquire(ctx, 60*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer p.release(renderer)
+
+	return renderer.RenderPageWithLayout(ctx, url)
 }
 
 // IsBusy returns true if all renderers in the pool are busy
