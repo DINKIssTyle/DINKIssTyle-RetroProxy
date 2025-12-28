@@ -33,6 +33,13 @@ func (a *App) startup(ctx context.Context) {
 	a.server.SetShutdownCallback(func() {
 		runtime.Quit(a.ctx)
 	})
+	a.server.SetRestartCallback(func() {
+		port := a.server.GetPort()
+		a.addLog("Restarting server...")
+		a.server.ForceStop()
+		a.server.Start(port)
+		a.addLog("Server restarted")
+	})
 	a.addLog("Application started")
 }
 

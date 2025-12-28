@@ -4,6 +4,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -16,10 +17,19 @@ import (
 	"github.com/go-rod/stealth"
 )
 
+// ErrRendererBusy is returned when the renderer is busy processing another request
+var ErrRendererBusy = errors.New("renderer is busy, please try again later")
+
 // Renderer uses a headless browser to render modern web pages
 type Renderer struct {
 	browser *rod.Browser
 	mu      sync.Mutex
+	busy    bool
+}
+
+// IsBusy returns true if the renderer is currently processing a request
+func (r *Renderer) IsBusy() bool {
+	return r.busy
 }
 
 // NewRenderer creates a new renderer

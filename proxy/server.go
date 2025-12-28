@@ -5,6 +5,7 @@ import (
 	crand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,7 +20,7 @@ import (
 type Server struct {
 	port             int
 	server           *http.Server
-	renderer         *Renderer
+	rendererPool     *RendererPool
 	simplifier       Simplifier
 	encoder          *Encoder
 	imageConverter   *ImageConverter
@@ -28,6 +29,7 @@ type Server struct {
 	mu               sync.RWMutex
 	logger           func(string)
 	shutdownCallback func()
+	restartCallback  func()
 
 	// Image Map Mode
 	proxyMode  string // "html", "text", "image"
@@ -39,7 +41,7 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{
 		port:           8080,
-		renderer:       NewRenderer(),
+		rendererPool:   NewRendererPool(3), // Pool of 3 browser instances
 		simplifier:     NewSimplifier320(),
 		encoder:        NewEncoder(),
 		imageConverter: NewImageConverter(),
@@ -58,6 +60,11 @@ func (s *Server) SetLogger(logger func(string)) {
 // SetShutdownCallback sets the shutdown callback
 func (s *Server) SetShutdownCallback(cb func()) {
 	s.shutdownCallback = cb
+}
+
+// SetRestartCallback sets the restart callback
+func (s *Server) SetRestartCallback(cb func()) {
+	s.restartCallback = cb
 }
 
 // log logs a message using the logger callback
@@ -96,7 +103,7 @@ func (s *Server) Start(port int) error {
 	return nil
 }
 
-// Stop stops the proxy server
+// Stop stops the proxy server (graceful with timeout, then force)
 func (s *Server) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,16 +112,41 @@ func (s *Server) Stop() error {
 		return fmt.Errorf("server is not running")
 	}
 
+	// Close all browser processes in the pool
+	s.rendererPool.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("failed to shutdown server: %w", err)
+	err := s.server.Shutdown(ctx)
+	if err != nil {
+		// Graceful shutdown failed, force close
+		s.log("Graceful shutdown timeout, forcing close...")
+		s.server.Close()
 	}
 
 	s.running = false
 	s.log("Server stopped")
 	return nil
+}
+
+// ForceStop immediately stops the server without waiting for connections
+func (s *Server) ForceStop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.running {
+		return fmt.Errorf("server is not running")
+	}
+
+	// Close all browser processes in the pool
+	s.rendererPool.Close()
+
+	// Force close immediately
+	err := s.server.Close()
+	s.running = false
+	s.log("Server force stopped")
+	return err
 }
 
 // IsRunning returns true if the server is running
@@ -397,7 +429,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if mode == "image" {
 		html, err = s.renderImageMode(targetURL, false)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Image Render Failed: %v", err), http.StatusBadGateway)
+			// Check if renderer is busy
+			if errors.Is(err, ErrRendererBusy) {
+				s.serveRetryPage(w, targetURL, "The server is currently busy processing another page.")
+				return
+			}
+			s.serveRetryPage(w, targetURL, fmt.Sprintf("Image Render Failed: %v", err))
 			return
 		}
 		// Return directly (no simplification needed for image mode HTML)
@@ -408,12 +445,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Normal HTML Mode (or Text Mode)
 	// For HTTP URLs, we can also render them for consistency
-	html, err = s.renderer.RenderPage(targetURL)
+	html, err = s.rendererPool.RenderPage(targetURL)
 	if err != nil {
+		// Check if renderer is busy
+		if errors.Is(err, ErrRendererBusy) {
+			s.serveRetryPage(w, targetURL, "The server is currently busy processing another page.")
+			return
+		}
 		// Fallback: try direct fetch
 		html, err = s.fetchDirect(targetURL)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to fetch page: %v", err), http.StatusBadGateway)
+			s.serveRetryPage(w, targetURL, fmt.Sprintf("Failed to fetch page: %v", err))
 			return
 		}
 	}
@@ -527,7 +569,7 @@ func (s *Server) handleDebugView(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Standard HTML 3.2 Mode
 		renderStart := time.Now()
-		renderHTML, renderErr := s.renderer.RenderPage(targetURL)
+		renderHTML, renderErr := s.rendererPool.RenderPage(targetURL)
 		renderDuration := time.Since(renderStart)
 		if renderErr != nil {
 			http.Error(w, fmt.Sprintf("Failed to render: %v", renderErr), http.StatusBadGateway)
@@ -798,6 +840,32 @@ func (s *Server) serveHomePage(w http.ResponseWriter) {
 	w.Write([]byte(html))
 }
 
+// serveRetryPage shows a friendly error page that auto-refreshes
+func (s *Server) serveRetryPage(w http.ResponseWriter, targetURL string, message string) {
+	html := fmt.Sprintf(`<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+<head>
+<title>Please Wait - DKST RetroProxy</title>
+<meta http-equiv="refresh" content="5;url=%s">
+</head>
+<body bgcolor="#ffffff" text="#000000">
+<center>
+<h1>Please Try Again</h1>
+<hr>
+<p><b>%s</b></p>
+<p>The page will automatically reload in 5 seconds...</p>
+<br>
+<a href="%s"><button>Retry Now</button></a>
+<br><br>
+<font size="1">DKST RetroProxy</font>
+</center>
+</body>
+</html>`, targetURL, message, targetURL)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	w.Write([]byte(html))
+}
+
 // getLocalIP returns the local IP address
 func (s *Server) getLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
@@ -897,7 +965,7 @@ func (s *Server) Close() error {
 	if s.running {
 		s.Stop()
 	}
-	return s.renderer.Close()
+	return s.rendererPool.Close()
 }
 
 // renderImageMode captures screenshot, slices it, and returns HTML with image map
@@ -910,7 +978,7 @@ func (s *Server) renderImageMode(targetURL string, debugMode bool) (html string,
 	}()
 
 	// Capture full page screenshot directly (returns []byte now)
-	imageData, links, inputs, _, err := s.renderer.CaptureScreenshotAndLinks(targetURL)
+	imageData, links, inputs, _, err := s.rendererPool.CaptureScreenshotAndLinks(targetURL)
 	if err != nil {
 		s.log(fmt.Sprintf("Error capturing screenshot: %v", err))
 		return "", err
@@ -1103,15 +1171,32 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if action == "Restart" {
-			// Restart Proxy just means maybe clearing cache or just redirecting back?
-			// User asked for "Server Reload".
-			// We can just say "Reloaded".
-			// Maybe clear image cache?
-			s.mu.Lock()
-			s.imageTiles = make(map[string][]Tile)
-			s.mu.Unlock()
-			// Redirect back
-			http.Redirect(w, r, "/", http.StatusFound)
+			// Show restarting message and trigger restart callback
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(`<html>
+<head>
+<meta http-equiv="refresh" content="3;url=http://server">
+</head>
+<body>
+<center>
+<h1>Restarting...</h1>
+<p>Please wait. Redirecting automatically in 3 seconds...</p>
+<br>
+<a href="http://server"><button>Go to Settings</button></a>
+</center>
+</body>
+</html>`))
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				// Clear caches
+				s.muTiles.Lock()
+				s.imageTiles = make(map[string][]Tile)
+				s.muTiles.Unlock()
+				// Trigger restart callback if set
+				if s.restartCallback != nil {
+					s.restartCallback()
+				}
+			}()
 			return
 		}
 
@@ -1292,8 +1377,8 @@ func (s *Server) handleInputAction(w http.ResponseWriter, r *http.Request) {
 	xpath := string(xpathBytes)
 	doEnter := (action == "Input & Enter")
 
-	// Perform interaction via renderer
-	imageData, links, inputs, newURL, err := s.renderer.SubmitInput(targetURL, xpath, text, doEnter)
+	// Perform interaction via renderer pool
+	imageData, links, inputs, newURL, err := s.rendererPool.SubmitInput(targetURL, xpath, text, doEnter)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Interaction failed: %v", err), http.StatusInternalServerError)
 		return
