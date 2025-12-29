@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -83,6 +84,15 @@ func (c *ImageConverter) FetchAndConvertImage(targetURL string) ([]byte, string,
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
+	// Set Referer to bypass hotlink protection
+	if u, err := url.Parse(targetURL); err == nil {
+		origin := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		req.Header.Set("Referer", origin)
+		req.Header.Set("Origin", origin)
+	}
+	req.Header.Set("Sec-Fetch-Dest", "image")
+	req.Header.Set("Sec-Fetch-Mode", "no-cors")
+
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to fetch image: %w", err)
@@ -142,25 +152,20 @@ func (c *ImageConverter) FetchAndConvertImage(targetURL string) ([]byte, string,
 	return buf.Bytes(), newContentType, nil
 }
 
-// convertToPalettedWithTransparency converts an image to Paletted format preserving transparency
-// convertToPalettedWithTransparency converts an image to Paletted format preserving transparency
-// It uses GIF encoding to generate an optimized palette for better color quality.
+// convertToPalettedWithTransparency converts an image to Paletted format preserving transparency.
+// [DO NOT CHANGE THIS FUNCTION WITHOUT CAREFUL TESTING]
+// Uses GIF round-trip for adaptive quantization + manual transparency enforcement.
 func convertToPalettedWithTransparency(m image.Image) *image.Paletted {
-	// If already paletted, return as is
-	if pm, ok := m.(*image.Paletted); ok {
-		return pm
-	}
+	bounds := m.Bounds()
 
-	// 1. Use GIF encoding to generate an optimized palette
-	// This uses the standard library's quantizer which is better than fixed Plan9
+	// Step 1: Use GIF encode/decode round-trip for good adaptive palette
 	var buf bytes.Buffer
-	err := gif.Encode(&buf, m, &gif.Options{NumColors: 256, Quantizer: nil, Drawer: nil})
+	err := gif.Encode(&buf, m, &gif.Options{NumColors: 256})
 	if err != nil {
-		// Fallback to basic conversion if encoding fails
+		// Fallback to Plan9 if encoding fails
 		return convertToPalettedPlan9(m)
 	}
 
-	// 2. Decode back to get the paletted image
 	img, err := gif.Decode(&buf)
 	if err != nil {
 		return convertToPalettedPlan9(m)
@@ -171,14 +176,72 @@ func convertToPalettedWithTransparency(m image.Image) *image.Paletted {
 		return convertToPalettedPlan9(m)
 	}
 
-	return pm
+	// Step 2: Enforce transparency at index 0
+	// Save original color at index 0 so we can remap pixels that used it
+	origColor0 := pm.Palette[0]
+
+	// Create new palette with transparency at index 0
+	newPalette := make(color.Palette, len(pm.Palette))
+	copy(newPalette, pm.Palette)
+	newPalette[0] = color.RGBA{0, 0, 0, 0} // Transparent
+
+	// Create result image
+	result := image.NewPaletted(bounds, newPalette)
+
+	// Step 3: Re-map pixels from original image
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			origC := m.At(x, y)
+			_, _, _, a := origC.RGBA()
+
+			if a < 0x8000 {
+				// Transparent pixel -> index 0
+				result.SetColorIndex(x, y, 0)
+			} else {
+				// Opaque pixel -> use GIF-quantized result, but handle index 0 special case
+				gifIdx := pm.ColorIndexAt(x, y)
+				if gifIdx == 0 {
+					// This pixel was mapped to index 0, but we changed index 0 to transparent.
+					// Find the nearest color in the new palette (excluding index 0).
+					bestIdx := uint8(1)
+					bestDist := colorDistance(origC, newPalette[1])
+					for i := 2; i < len(newPalette); i++ {
+						d := colorDistance(origC, newPalette[i])
+						if d < bestDist {
+							bestDist = d
+							bestIdx = uint8(i)
+						}
+					}
+					// Or if the original color at index 0 is close enough, we can check
+					// Actually, let's add the original color0 back to palette if possible
+					// For simplicity, just use the best match found
+					_ = origColor0 // unused but kept for potential future use
+					result.SetColorIndex(x, y, bestIdx)
+				} else {
+					result.SetColorIndex(x, y, gifIdx)
+				}
+			}
+		}
+	}
+
+	return result
 }
 
-// convertToPalettedPlan9 is a fallback using fixed Plan9 palette
+// colorDistance calculates squared distance between two colors
+func colorDistance(c1, c2 color.Color) int {
+	r1, g1, b1, _ := c1.RGBA()
+	r2, g2, b2, _ := c2.RGBA()
+	dr := int(r1>>8) - int(r2>>8)
+	dg := int(g1>>8) - int(g2>>8)
+	db := int(b1>>8) - int(b2>>8)
+	return dr*dr + dg*dg + db*db
+}
+
+// convertToPalettedPlan9 is the fallback using fixed palette
 func convertToPalettedPlan9(m image.Image) *image.Paletted {
 	var pal color.Palette = make([]color.Color, len(palette.Plan9))
 	copy(pal, palette.Plan9)
-	pal[0] = color.RGBA{0, 0, 0, 0} // Reserve index 0 for transparency
+	pal[0] = color.RGBA{0, 0, 0, 0}
 
 	bounds := m.Bounds()
 	pm := image.NewPaletted(bounds, pal)

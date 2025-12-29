@@ -326,14 +326,17 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		page.WaitRequestIdle(500*time.Millisecond, nil, nil, nil)()
+		page.WaitRequestIdle(1*time.Second, nil, nil, nil)()
 	}()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 	}
+
+	// Additional wait for JS-rendered content (important for news sites)
+	time.Sleep(500 * time.Millisecond)
 
 	// Extract layout data using JavaScript (Block-based approach)
 	jsCode := `() => {
@@ -343,8 +346,20 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 		// Helper: Check if element is a block-level container
 		const isBlock = (el) => {
 			const style = window.getComputedStyle(el);
-			return (style.display === 'block' || style.display === 'flex' || style.display === 'grid' || style.display === 'table' || style.display === 'table-cell' || style.display === 'list-item' || style.display === 'article' || style.display === 'section' || style.display === 'header' || style.display === 'footer') 
-				   && style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none';
+			const display = style.display;
+			const tag = el.tagName.toLowerCase();
+			
+			// Semantic fallback: treat article content elements as blocks regardless of CSS
+			const semanticBlocks = ['article', 'section', 'main', 'aside', 'nav', 'header', 'footer', 'p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'figcaption', 'figure'];
+			const isSemanticBlock = semanticBlocks.includes(tag);
+			
+			// CSS-based block detection
+			const isDisplayBlock = (display === 'block' || display === 'flex' || display === 'grid' || display === 'table' || display === 'table-cell' || display === 'list-item' || display === 'inline-block' || display === '-webkit-box');
+			
+			// Must be visible
+			const isVisible = style.visibility !== 'hidden' && style.opacity !== '0' && display !== 'none';
+			
+			return (isDisplayBlock || isSemanticBlock) && isVisible;
 		};
 
 		// Helper: Check if element contains any block-level children
@@ -361,10 +376,53 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 		allElements.forEach(el => {
 			if (!isBlock(el)) return;
 			
-			// We want "Leaf Blocks" - blocks that don't split deeply into other blocks.
-			// This keeps text paragraphs, lists, and headers intact.
-			if (hasBlockChildren(el)) return;
+			// Check if this block itself is a link or is inside a link
+			let href = '';
+			const parentLink = el.closest('a');
+			if (el.tagName.toLowerCase() === 'a') {
+				href = el.href;
+			} else if (parentLink) {
+				href = parentLink.href;
+			}
 
+			// CASE 1: Container Block (Mixed Content)
+			// If it has block children, we usually skip it in the Leaf Block logic.
+			// BUT we must rescue any direct text nodes (orphans) that sit between blocks.
+			if (hasBlockChildren(el)) {
+				el.childNodes.forEach(node => {
+					if (node.nodeType === 3) { // Text Node
+						const orphanText = node.nodeValue.trim();
+						if (orphanText.length > 0) {
+							const range = document.createRange();
+							range.selectNode(node);
+							const rect = range.getBoundingClientRect();
+							if (rect.width > 0 && rect.height > 0) {
+								result.push({
+									tag: 'span', // Treat as span
+									x: rect.x,
+									y: rect.y,
+									w: rect.width,
+									h: rect.height,
+									text: orphanText, // Use unique name just in case
+									html: '',
+									href: href,
+									src: '',
+									alt: '',
+									hidden: false,
+									isBlock: false,
+									fontSize: parseFloat(window.getComputedStyle(el).fontSize) || 14,
+									color: window.getComputedStyle(el).color,
+									bgColor: 'transparent',
+									textAlign: window.getComputedStyle(el).textAlign
+								});
+							}
+						}
+					}
+				});
+				return; // Skip the container element itself
+			}
+
+			// CASE 2: Leaf Block
 			// Filter out empty blocks
 			const text = el.innerText || el.textContent || '';
 			if (text.trim() === '' && !el.querySelector('img')) return;
@@ -382,15 +440,6 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 				tag = 'div';
 			}
 
-			// Check if this block itself is a link or is inside a link
-			let href = '';
-			const parentLink = el.closest('a');
-			if (el.tagName.toLowerCase() === 'a') {
-				href = el.href;
-			} else if (parentLink) {
-				href = parentLink.href;
-			}
-
 			// Add to result
 			uniqueElements.add(el);
 			result.push({
@@ -399,7 +448,7 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 				y: rect.y,
 				w: rect.width,
 				h: rect.height,
-				text: el.innerText || el.textContent || '',
+				text: text,
 				html: el.innerHTML,
 				href: href,
 				src: '',
@@ -414,14 +463,50 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 		});
 
 		// 2. Rescue orphan images (images not inside the captured leaf blocks)
-		// Since we captured leaf blocks, most images inside them are "in the HTML".
-		// But images that ARE blocks themselves or direct children of rejected parents might be missed?
-		// Actually, if <img> is inline, it's inside a leaf block.
-		// If <img> is block (display: block), it is a leaf block itself (hasBlockChildren is false for img).
-		// So logic above covers images too!
-		// Just in case, let's explicitly look for 'img' tags that weren't captured?
-		// No, let's trust the logic first. If <img> is display:block, it's caught.
-		// If <img> is inline, it's inside a parent leaf block (caught).
+		// Images inside captured leaf blocks have their HTML preserved.
+		// But images that are inside skipped containers need explicit capture.
+		document.querySelectorAll('img').forEach(img => {
+			// Skip if already inside a captured element
+			let parent = img.parentElement;
+			let isInCaptured = false;
+			while (parent && parent !== document.body) {
+				if (uniqueElements.has(parent)) {
+					isInCaptured = true;
+					break;
+				}
+				parent = parent.parentElement;
+			}
+			if (isInCaptured) return;
+
+			const rect = img.getBoundingClientRect();
+			if (rect.width <= 10 || rect.height <= 10) return; // Skip tiny images (likely icons/trackers)
+			if (rect.bottom < 0 || rect.top > window.innerHeight * 10) return;
+
+			// Get src from various attributes
+			let src = img.src || img.dataset.src || img.dataset.original || img.dataset.lazySrc || '';
+			if (!src || src.startsWith('data:')) return;
+
+			const alt = img.alt || '';
+
+			result.push({
+				tag: 'img',
+				x: rect.x,
+				y: rect.y,
+				w: rect.width,
+				h: rect.height,
+				text: '',
+				html: img.outerHTML,
+				href: '',
+				src: src,
+				alt: alt,
+				hidden: false,
+				isBlock: true,
+				fontSize: 0,
+				color: '',
+				bgColor: '',
+				textAlign: ''
+			});
+		});
 		
 		// 3. HR Extraction
 		document.querySelectorAll('hr').forEach(hr => {

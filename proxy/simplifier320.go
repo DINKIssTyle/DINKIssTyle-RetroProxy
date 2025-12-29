@@ -387,6 +387,24 @@ func convertURLsOnNode(n *html.Node, pageBase *url.URL, forceHTTP bool, debugMod
 		if forceHTTP {
 			abs = httpsToHttp(abs)
 		}
+
+		// Handle Image Proxy (for src)
+		if k == "src" {
+			// Skip placeholders
+			if strings.HasPrefix(val, "data:") || len(val) < 10 {
+				n.Attr[i].Val = abs // just update to absolute
+			} else {
+				// Rewrite access to go through our image proxy
+				// This fixes HTTPS/TLS issues for old browsers
+				if !strings.HasPrefix(abs, "/_drp") && (strings.HasPrefix(abs, "http://") || strings.HasPrefix(abs, "https://")) {
+					n.Attr[i].Val = "/_drp/image?url=" + url.QueryEscape(abs)
+				} else {
+					n.Attr[i].Val = abs
+				}
+			}
+			continue
+		}
+
 		n.Attr[i].Val = abs
 
 		// Debug Mode: Rewrite href links to go through debug viewer

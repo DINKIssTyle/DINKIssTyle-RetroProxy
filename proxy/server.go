@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	xhtml "golang.org/x/net/html"
 )
 
 // Server represents the proxy server
@@ -348,6 +350,39 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// [FIX] Robustly detect /_drp requests even if they are absolute URLs (e.g. http://daum.net/_drp/image)
+	// In proxy mode, browsers send the full URL. Go parses this into URL struct, but sometimes Path might be ambiguous.
+	path := r.URL.Path
+	if path == "" && r.URL.IsAbs() {
+		// Try to extract path from RequestURI if Path is empty
+		if strings.Contains(r.RequestURI, "/_drp/") {
+			u, err := url.Parse(r.RequestURI)
+			if err == nil {
+				path = u.Path
+			}
+		}
+	}
+
+	// Sanity check: if the request is destined for an external host but has our internal path,
+	// we MUST intercept it.
+	if strings.HasPrefix(path, "/_drp") || strings.Contains(r.RequestURI, "/_drp/") {
+		// Normalize path for subsequent checks
+		if !strings.HasPrefix(path, "/_drp") {
+			// Extract /_drp part from absolute URI
+			if idx := strings.Index(r.RequestURI, "/_drp"); idx != -1 {
+				// We need to be careful with query parameters
+				rest := r.RequestURI[idx:]
+				// Parse it as a relative URL to get the clean path
+				if u, err := url.Parse(rest); err == nil {
+					path = u.Path
+					// Update r.URL logic to match internal handler expectations
+					r.URL.Path = path
+					r.URL.RawQuery = u.RawQuery
+				}
+			}
+		}
+	}
+
 	// Handle debug API endpoint - /_drp/set
 	if strings.HasPrefix(r.URL.Path, "/_drp/set") {
 		s.handleDebugAPI(w, r)
@@ -369,6 +404,17 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Handle Image Tile endpoint - /_drp/tile/{uuid}/{index}
 	if strings.HasPrefix(r.URL.Path, "/_drp/tile/") {
 		s.handleImageTile(w, r)
+		return
+	}
+
+	// Handle Image Proxy endpoints - /_drp/image
+	if strings.HasPrefix(r.URL.Path, "/_drp/image") {
+		targetURL := r.URL.Query().Get("url")
+		if targetURL == "" {
+			http.Error(w, "Missing url parameter", http.StatusBadRequest)
+			return
+		}
+		s.proxyImage(w, r, targetURL)
 		return
 	}
 
@@ -414,7 +460,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Check if it's an image request - proxy directly without rendering
 	if s.isImageRequest(targetURL) {
-		s.proxyImage(w, targetURL)
+		s.proxyImage(w, r, targetURL)
 		return
 	}
 
@@ -1009,14 +1055,18 @@ func (s *Server) serveRetryPage(w http.ResponseWriter, targetURL string, message
 <p><b>%s</b></p>
 <p>The page will automatically reload in 5 seconds...</p>
 <br>
-<a href="%s"><button>Retry Now</button></a>
+<form action="%s" method="GET" style="display:inline;">
+<input type="submit" value="Retry Now">
+</form>
 &nbsp;
-<a href="http://server/"><button>Server Settings</button></a>
+<form action="http://server/" method="GET" style="display:inline;">
+<input type="submit" value="Server Settings">
+</form>
 <br><br>
-<font size="1">%s</font>
+<font size="1">%s<br>%s</font>
 </center>
 </body>
-</html>`, targetURL, message, targetURL, FooterText)
+</html>`, targetURL, message, targetURL, FooterText, CopyrightText)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	w.Write([]byte(html))
@@ -1070,9 +1120,66 @@ func (s *Server) isBlockedResource(targetURL string) bool {
 }
 
 // proxyImage proxies image requests with optional format conversion
-func (s *Server) proxyImage(w http.ResponseWriter, targetURL string) {
-	// Use image converter
-	imageData, contentType, err := s.imageConverter.FetchAndConvertImage(targetURL)
+func (s *Server) proxyImage(w http.ResponseWriter, r *http.Request, targetURL string) {
+	// Check format override from UI
+	format := s.imageConverter.GetFormat()
+
+	// [ADAPTIVE IMAGE FORMAT]
+	// If format is "Original" (default), we must be careful.
+	// Modern browsers (Debug View) can handle WebP/Avif (Scenario A).
+	// Legacy browsers (IE, Netscape) cannot (Scenario B).
+	// We should detect legacy browsers and FORCE a compatible format (JPEG or GIF) if "Original" is selected.
+	if format == "original" || format == "" {
+		userAgent := r.Header.Get("User-Agent")
+		browserInfo := s.encoder.DetectLegacyBrowser(userAgent)
+		if browserInfo.IsLegacy {
+			// Legacy browser detected!
+			// User request: Netscape 3 supports PNG8. IE6 supports PNG (with alpha issues, but index transparency works).
+			// JPEG is safe but looks bad for graphics. PNG8 is better.
+			// Let's force PNG8 for legacy browsers.
+			format = "png8"
+		}
+	}
+
+	// Create a temporary converter with the resolved format (to avoid changing global state)
+	// We can't change s.imageConverter.format because it's global.
+	// Actually, ImageConverter.FetchAndConvertImage uses its internal format.
+	// We should probably pass the format to FetchAndConvertImage or set it on a temp converter.
+	// Since ImageConverter is struct with client, detailed cloning is heavy.
+	// Better: Add SetFormat equivalent or method that accepts format.
+	// For now, let's modify the ImageConverter to accept an override or create a new one sharing the client?
+	// NewImageConverter creates new client. That's fine for now, or we can add FetchAndConvertImageWithFormat.
+
+	// Let's go with creating a quick copy or modifying the method.
+	// Modifying method key signature is too big.
+	// Let's just manually set format if we can, but concurrency...
+	// ImageConverter is shared. Modifying it is NOT SAFE concurrently if we write to it.
+	// The current implementation of GetFormat/SetFormat IS NOT THREAD SAFE regarding the internal field if used during fetch.
+	// Wait, SetFormat just sets a string. FetchAndConvertImage reads it.
+	// If one user changes settings, it affects all. That is expected behavior for "Global Settings".
+	// But "Adaptive" means per-request deviance from global settings.
+
+	// Solution: We need `FetchAndConvertImageToFormat` method.
+	// But to avoid big refactor, let's just instantiate a new helper or use a specific function if we want adaptive.
+
+	// Let's modify ImageConverter to support one-off format?
+	// No, let's just extend the method in a separate step if needed.
+	// actually `FetchAndConvertImage` uses `c.format`.
+	// We should create a temp converter sharing the client?
+	// `client` is a pointer.
+
+	tempConverter := *s.imageConverter // Shallow copy
+	tempConverter.SetFormat(format)    // Set format on copy (ImageConverter struct is small, just format and client pointer)
+	// Wait, SetFormat takes pointer receiver. `tempConverter` is value.
+	// `tempConverter.SetFormat` will verify.
+	// `SetFormat` sets `c.format`.
+
+	// Go quirk:
+	// c := *s.imageConverter
+	// c.SetFormat(...) -> If SetFormat is (c *T), then &c is passed.
+	// Correct.
+
+	imageData, contentType, err := tempConverter.FetchAndConvertImage(targetURL)
 	if err != nil {
 		http.Error(w, "Failed to fetch image", http.StatusBadGateway)
 		return
@@ -1110,10 +1217,119 @@ func (s *Server) fetchDirect(targetURL string) (string, error) {
 
 // rewriteLinksForProxy modifies links to work with proxy
 // For standard HTTP proxy, absolute URLs work automatically
-func (s *Server) rewriteLinksForProxy(html string, baseURL *url.URL) string {
-	// For standard proxy mode, we don't need to rewrite URLs
-	// The browser will send all requests through the proxy automatically
-	return html
+func (s *Server) rewriteLinksForProxy(htmlContent string, baseURL *url.URL) string {
+	// Use Tokenizer to rewrite URLs without parsing the whole DOM tree (preserves scripts/styles best)
+	z := xhtml.NewTokenizer(strings.NewReader(htmlContent))
+	var sb strings.Builder
+
+	// Inject Image Fixer Script for Modern Mode (Handle dynamic JS loading)
+	// This script catches images loaded by JS (lazy load) and rewrites them to proxy
+	imageFixerScript := `<script language="JavaScript">
+<!--
+function drpErrorHandler() { return true; }
+window.onerror = drpErrorHandler;
+
+function drpFixImages() {
+	if (document.images) {
+		for (var i = 0; i < document.images.length; i++) {
+			var img = document.images[i];
+			var src = img.src;
+			if (src && (src.indexOf('http://') == 0 || src.indexOf('https://') == 0) && src.indexOf('/_drp') == -1) {
+				var safeSrc = src;
+				if (window.encodeURIComponent) {
+					safeSrc = encodeURIComponent(src);
+				} else {
+					safeSrc = escape(src);
+				}
+				img.src = "/_drp/image?url=" + safeSrc;
+			}
+		}
+	}
+}
+if (window.setInterval) {
+	window.setInterval("drpFixImages()", 1000);
+}
+drpFixImages();
+// -->
+</script>`
+	// Don't inject yet. Wait for body.
+	scriptInjected := false
+
+	for {
+		tt := z.Next()
+		if tt == xhtml.ErrorToken {
+			if z.Err() == io.EOF {
+				break
+			}
+			// On error, just return usage of original (or whatever we have)
+			return htmlContent
+		}
+
+		token := z.Token()
+
+		// Inject script at start of body
+		if !scriptInjected && tt == xhtml.StartTagToken && strings.EqualFold(token.Data, "body") {
+			sb.WriteString(token.String())
+			sb.WriteString(imageFixerScript)
+			scriptInjected = true
+			continue
+		}
+
+		if tt == xhtml.StartTagToken || tt == xhtml.SelfClosingTagToken {
+			for i, attr := range token.Attr {
+				key := strings.ToLower(attr.Key)
+				val := attr.Val
+
+				// Rewrite SRC (img, script, frame, etc)
+				if key == "src" {
+					// Handle lazy loading by checking if val is empty/placeholder?
+					// For Passthrough, we stick to src.
+					if val != "" && !strings.HasPrefix(val, "data:") {
+						resolved := s.resolveURL(val, baseURL)
+						// Convert HTTPS to Image Proxy for compatibility
+						if !strings.HasPrefix(resolved, "/_drp") && (strings.HasPrefix(resolved, "http://") || strings.HasPrefix(resolved, "https://")) {
+							resolved = "/_drp/image?url=" + url.QueryEscape(resolved)
+						}
+						token.Attr[i].Val = resolved
+					}
+				} else if key == "href" {
+					// Rewrite HREF (links, css)
+					if val != "" && !strings.HasPrefix(val, "#") && !strings.HasPrefix(strings.ToLower(val), "javascript:") {
+						resolved := s.resolveURL(val, baseURL)
+						// For CSS, we might want to proxy it too?
+						// But for now, let's keep it simple. Browsers might block HTTPS CSS.
+						// If tag is 'link', it is likely CSS.
+						if token.Data == "link" {
+							// Use Image Proxy (generic proxy) for CSS too to handle HTTPS
+							if !strings.HasPrefix(resolved, "/_drp") && (strings.HasPrefix(resolved, "http://") || strings.HasPrefix(resolved, "https://")) {
+								resolved = "/_drp/image?url=" + url.QueryEscape(resolved)
+							}
+						}
+						token.Attr[i].Val = resolved
+					}
+				}
+			}
+		}
+
+		sb.WriteString(token.String())
+	}
+
+	return sb.String()
+}
+
+// resolveURL helper for server
+func (s *Server) resolveURL(href string, base *url.URL) string {
+	if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "/_drp") {
+		return href
+	}
+	if strings.HasPrefix(href, "//") {
+		return "http:" + href
+	}
+	u, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return base.ResolveReference(u).String()
 }
 
 // Close cleans up resources
@@ -1423,7 +1639,7 @@ func (s *Server) handleManagementPage(w http.ResponseWriter, r *http.Request) {
 <br>
 <input type="submit" value="Save Settings">
 </form>
-<br><hr width="50%"><br>
+<br><hr width="50%%"><br>
 <form method="POST" action="/action">
 <input type="submit" name="act" value="Restart"> &nbsp;
 <input type="submit" name="act" value="Shutdown">

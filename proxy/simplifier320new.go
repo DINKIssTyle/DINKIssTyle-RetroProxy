@@ -225,7 +225,24 @@ func (s *Simplifier320New) renderMultiColumn(elements []LayoutElement, pageBase 
 func (s *Simplifier320New) renderSingleColumn(elements []LayoutElement, pageBase *url.URL, debugMode bool) string {
 	var sb strings.Builder
 
-	for _, el := range elements {
+	for i, el := range elements {
+		if i > 0 {
+			prev := elements[i-1]
+			// Check if we need a line break
+			// If Y difference is significant, force break
+			if el.Y > prev.Y+12 { // 12px tolerance for same line
+				sb.WriteString("<br>\n")
+			} else {
+				// Same line, add spacing
+				// Check X gap
+				gap := el.X - (prev.X + prev.W)
+				if gap > 10 {
+					sb.WriteString("&nbsp; ")
+				} else {
+					sb.WriteString(" ")
+				}
+			}
+		}
 		sb.WriteString(s.renderElement(el, pageBase, debugMode))
 	}
 
@@ -241,30 +258,10 @@ func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, de
 			return ""
 		}
 
-		// Apply styles
 		var sb strings.Builder
 
-		// Align
-		align := ""
-		if strings.Contains(el.Align, "center") {
-			align = "center"
-		} else if strings.Contains(el.Align, "right") {
-			align = "right"
-		} else if strings.Contains(el.Align, "justify") {
-			align = "justify"
-		} else if strings.Contains(el.Align, "left") {
-			align = "left"
-		}
-
-		if align != "" {
-			sb.WriteString(fmt.Sprintf("<div align=\"%s\">", align))
-		} else {
-			sb.WriteString("<div>") // Always wrap in div for block behavior
-		}
-
 		// Font/Color
-		// Size mapping: 14px -> size 3, 18px -> size 4, 24px -> size 5, 32px -> size 6
-		size := "3" // Default
+		size := "3"
 		if el.FontSize >= 32 {
 			size = "6"
 		} else if el.FontSize >= 24 {
@@ -277,21 +274,21 @@ func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, de
 
 		colorAttr := ""
 		if el.Color != "" && el.Color != "rgb(0, 0, 0)" && el.Color != "rgba(0, 0, 0, 0)" {
-			// Basic hex conversion (simplified) - assuming browser returns rgb(r, g, b)
-			// For robustness, skip complex parsing for now or use black
-			// Check if it's already hex
 			if strings.HasPrefix(el.Color, "#") {
 				colorAttr = fmt.Sprintf(" color=\"%s\"", el.Color)
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("<font size=\"%s\"%s>", size, colorAttr))
-
-		// BgColor (Table cell usually handles this, but here we can't easily. Skip for now or use Table?)
-		// If BgColor is distinct, maybe use a 1x1 table? Too heavy.
+		// Only add font tag if needed
+		if size != "3" || colorAttr != "" {
+			sb.WriteString(fmt.Sprintf("<font size=\"%s\"%s>", size, colorAttr))
+		}
 
 		sb.WriteString(processed)
-		sb.WriteString("</font></div>\n")
+
+		if size != "3" || colorAttr != "" {
+			sb.WriteString("</font>")
+		}
 
 		result := sb.String()
 		if el.Href != "" {
@@ -299,22 +296,28 @@ func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, de
 			if debugMode && href != "" && !strings.HasPrefix(href, "#") && !strings.HasPrefix(href, "javascript:") && !strings.HasPrefix(href, "/_drp") {
 				href = "/debug?url=" + url.QueryEscape(href) + "&mode=3.2new"
 			}
-			// Wrap the entire block in an anchor
 			return fmt.Sprintf("<a href=\"%s\">%s</a>", href, result)
 		}
 
 		return result
 	}
 
-	// 2. Fallback for elements without HTML (e.g. standalone images found by secondary pass)
+	// 2. Fallback for elements without HTML (e.g. standalone images)
 	switch el.Tag {
 	case "img":
 		src := s.resolveURL(el.Src, pageBase)
+		// Fix: If resolved URL contains /_drp with wrong domain, extract just the /_drp path
+		if strings.Contains(src, "/_drp/") {
+			if idx := strings.Index(src, "/_drp/"); idx != -1 {
+				src = src[idx:] // Extract "/_drp/..." part
+			}
+		}
+
 		alt := el.Alt
 		if alt == "" {
 			alt = "[Image]"
 		}
-		return fmt.Sprintf("<img src=\"%s\" alt=\"%s\" border=\"0\"><br>\n", src, alt)
+		return fmt.Sprintf("<img src=\"%s\" alt=\"%s\" border=\"0\">", src, alt) // Removed <br> here too
 
 	case "hr":
 		return "<hr>\n"
@@ -325,7 +328,7 @@ func (s *Simplifier320New) renderElement(el LayoutElement, pageBase *url.URL, de
 		if text == "" {
 			return ""
 		}
-		return fmt.Sprintf("%s<br>\n", text)
+		return text // Removed <br> here too, let renderSingleColumn handle it
 	}
 }
 
@@ -341,6 +344,7 @@ func (s *Simplifier320New) processBlockHTML(rawHTML string, pageBase *url.URL, d
 	walk = func(n *html.Node) {
 		if n.Type == html.TextNode {
 			buf.WriteString(n.Data)
+			return
 		} else if n.Type == html.ElementNode {
 			tag := n.Data
 
@@ -392,16 +396,47 @@ func (s *Simplifier320New) processBlockHTML(rawHTML string, pageBase *url.URL, d
 			case "img":
 				src := ""
 				alt := ""
+				// Check for lazy loading attributes
+				lazySrc := ""
+
 				for _, a := range n.Attr {
-					if a.Key == "src" {
-						src = a.Val
-					}
-					if a.Key == "alt" {
-						alt = a.Val
+					key := strings.ToLower(a.Key)
+					val := a.Val
+
+					if key == "src" {
+						src = val
+					} else if key == "alt" {
+						alt = val
+					} else if key == "data-src" || key == "data-original" || key == "data-lazy-src" {
+						if lazySrc == "" { // prioritize first found
+							lazySrc = val
+						}
 					}
 				}
+
+				// Use lazy src if real src is missing or placeholder
+				if lazySrc != "" {
+					if src == "" || strings.HasPrefix(src, "data:") || len(src) < 100 {
+						src = lazySrc
+					}
+				}
+
 				if src != "" {
 					resolved := s.resolveURL(src, pageBase)
+
+					// Fix: If resolved URL contains /_drp with wrong domain, extract just the /_drp path
+					if strings.Contains(resolved, "/_drp/") {
+						if idx := strings.Index(resolved, "/_drp/"); idx != -1 {
+							resolved = resolved[idx:] // Extract "/_drp/..." part
+						}
+					}
+
+					// Rewrite to Image Proxy URL if not already local
+					// This handles HTTPS/TLS issues for legacy browsers
+					if !strings.HasPrefix(resolved, "/_drp") && (strings.HasPrefix(resolved, "http://") || strings.HasPrefix(resolved, "https://")) {
+						resolved = "/_drp/image?url=" + url.QueryEscape(resolved)
+					}
+
 					buf.WriteString(fmt.Sprintf("<img src=\"%s\" alt=\"%s\" border=\"0\">", resolved, alt))
 				}
 			case "p", "div":
@@ -410,8 +445,10 @@ func (s *Simplifier320New) processBlockHTML(rawHTML string, pageBase *url.URL, d
 					walk(c)
 				}
 				buf.WriteString("<br>")
+			case "script", "style", "noscript", "iframe", "svg", "meta", "link", "head", "title":
+				// Ignore completely (do not walk children)
 			default:
-				// Strip tag, keep content
+				// Strip tag, keep content (for span, font, etc.)
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					walk(c)
 				}
@@ -453,6 +490,11 @@ func (s *Simplifier320New) processBlockHTML(rawHTML string, pageBase *url.URL, d
 func (s *Simplifier320New) resolveURL(href string, pageBase *url.URL) string {
 	href = strings.TrimSpace(href)
 	if href == "" || strings.HasPrefix(href, "#") || strings.HasPrefix(strings.ToLower(href), "javascript:") || strings.HasPrefix(strings.ToLower(href), "data:") {
+		return href
+	}
+
+	// Preserve internal proxy paths - don't resolve against external base URL
+	if strings.HasPrefix(href, "/_drp") {
 		return href
 	}
 

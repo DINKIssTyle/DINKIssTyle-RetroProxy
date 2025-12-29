@@ -1,3 +1,4 @@
+// RendererPool manages a pool of Renderer instances for concurrent page rendering
 package proxy
 
 import (
@@ -87,7 +88,7 @@ func (s *SimplifierText) Simplify(inputHTML string, pageURL string, debugMode bo
 	}
 
 	// Simple Pre-formatting style for text mode
-	style := `<style>body{font-family:monospace;white-space:pre-wrap;word-wrap:break-word;background:#fff;color:#000;} a{text-decoration:underline;color:blue;}</style>`
+	style := `<style>body{font-family:monospace;white-space:normal;word-wrap:break-word;background:#fff;color:#000;} pre{white-space:pre-wrap;} a{text-decoration:underline;color:blue;}</style>`
 	return "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\"><html><head><title>Text Mode</title>" + style + "</head><body>" + buf.String() + "</body></html>", nil
 }
 
