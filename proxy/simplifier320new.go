@@ -30,6 +30,7 @@ type LayoutElement struct {
 	Color    string  `json:"color"`     // New computed style
 	BgColor  string  `json:"bgColor"`   // New computed style
 	Align    string  `json:"textAlign"` // New computed style
+	Priority int     `json:"priority"`  // 1=main content, 2=secondary, 3=navigation
 }
 
 // LayoutBlock represents a grouped block of elements at similar Y position
@@ -64,21 +65,50 @@ func (s *Simplifier320New) SimplifyFromLayout(elements []LayoutElement, pageURL 
 	// Filter out hidden elements and very small elements
 	visible := s.filterVisibleElements(elements)
 
-	// Sort by Y coordinate (reading order)
+	// [PHASE 2] Sort by Priority first (1=main, 2=secondary, 3=navigation), then by Y within each priority
 	sort.Slice(visible, func(i, j int) bool {
+		// Priority takes precedence
+		if visible[i].Priority != visible[j].Priority {
+			return visible[i].Priority < visible[j].Priority
+		}
+		// Within same priority, sort by Y (reading order)
 		if abs(visible[i].Y-visible[j].Y) < 10 {
 			return visible[i].X < visible[j].X
 		}
 		return visible[i].Y < visible[j].Y
 	})
 
-	// Group elements into blocks by Y position
-	blocks := s.groupIntoBlocks(visible)
+	// Separate priority 3 (navigation) elements - append them at the end or skip
+	var mainContent []LayoutElement
+	var secondaryContent []LayoutElement
+	for _, el := range visible {
+		if el.Priority == 3 {
+			// Skip navigation elements entirely for cleaner output
+			continue
+		} else if el.Priority == 2 {
+			secondaryContent = append(secondaryContent, el)
+		} else {
+			mainContent = append(mainContent, el)
+		}
+	}
 
-	// Convert blocks to HTML 3.2 table layout
-	content := s.blocksToHTML32(blocks, parsedPage, debugMode)
+	// Build HTML: Main content first, then secondary content at bottom
+	var sb strings.Builder
 
-	return s.wrapHTML32(pageTitle, content, pageURL, debugMode)
+	// Main content (Priority 1)
+	if len(mainContent) > 0 {
+		mainBlocks := s.groupIntoBlocks(mainContent)
+		sb.WriteString(s.blocksToHTML32(mainBlocks, parsedPage, debugMode))
+	}
+
+	// Secondary content (Priority 2) - after horizontal rule
+	if len(secondaryContent) > 0 {
+		sb.WriteString("<hr><font size=\"2\" color=\"#666666\"><b>관련 컨텐츠</b></font><br>\n")
+		secondaryBlocks := s.groupIntoBlocks(secondaryContent)
+		sb.WriteString(s.blocksToHTML32(secondaryBlocks, parsedPage, debugMode))
+	}
+
+	return s.wrapHTML32(pageTitle, sb.String(), pageURL, debugMode)
 }
 
 // filterVisibleElements removes hidden and tiny elements

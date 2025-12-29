@@ -370,6 +370,55 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 			return false;
 		};
 
+		// Helper: Get priority of element based on its container context
+		// Priority 1 = Main content (article, main, .article-body, etc.)
+		// Priority 2 = Secondary content (aside, sidebar, comments, related)
+		// Priority 3 = Navigation/UI (nav, header, footer, ads)
+		const getPriority = (el) => {
+			// Check ancestors to determine context
+			let current = el;
+			while (current && current !== document.body) {
+				const tag = current.tagName.toLowerCase();
+				const className = (current.className || '').toLowerCase();
+				const id = (current.id || '').toLowerCase();
+				const role = current.getAttribute('role') || '';
+				
+				// Priority 1: Main content containers
+				if (tag === 'article' || tag === 'main' || 
+					className.includes('article') || className.includes('post-content') ||
+					className.includes('news_view') || className.includes('content_body') ||
+					id.includes('articleBody') || id.includes('article') ||
+					role === 'main' || role === 'article') {
+					return 1;
+				}
+				
+				// Priority 3: Navigation/UI elements (check before secondary)
+				if (tag === 'nav' || tag === 'header' || tag === 'footer' ||
+					className.includes('nav') || className.includes('menu') ||
+					className.includes('header') || className.includes('footer') ||
+					className.includes('ad') || className.includes('banner') ||
+					className.includes('popup') || className.includes('modal') ||
+					role === 'navigation' || role === 'banner') {
+					return 3;
+				}
+				
+				// Priority 2: Secondary content
+				if (tag === 'aside' || 
+					className.includes('sidebar') || className.includes('aside') ||
+					className.includes('ranking') || className.includes('recommend') ||
+					className.includes('related') || className.includes('comment') ||
+					className.includes('most-viewed') || className.includes('popular') ||
+					role === 'complementary') {
+					return 2;
+				}
+				
+				current = current.parentElement;
+			}
+			
+			// Default: treat as secondary (conservative)
+			return 2;
+		};
+
 		// 1. Find Leaf Blocks (Blocks containing only inline content)
 		const allElements = document.body.querySelectorAll('*');
 		
@@ -413,7 +462,8 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 									fontSize: parseFloat(window.getComputedStyle(el).fontSize) || 14,
 									color: window.getComputedStyle(el).color,
 									bgColor: 'transparent',
-									textAlign: window.getComputedStyle(el).textAlign
+									textAlign: window.getComputedStyle(el).textAlign,
+									priority: getPriority(el)
 								});
 							}
 						}
@@ -458,7 +508,8 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 				fontSize: parseFloat(style.fontSize) || 14,
 				color: style.color,
 				bgColor: style.backgroundColor,
-				textAlign: style.textAlign
+				textAlign: style.textAlign,
+				priority: getPriority(el)
 			});
 		});
 
@@ -504,7 +555,8 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 				fontSize: 0,
 				color: '',
 				bgColor: '',
-				textAlign: ''
+				textAlign: '',
+				priority: getPriority(img)
 			});
 		});
 		
@@ -528,7 +580,8 @@ func (r *Renderer) RenderPageWithLayout(ctx context.Context, url string) (*Layou
 					fontSize: 0,
 					color: '',
 					bgColor: '',
-					textAlign: ''
+					textAlign: '',
+					priority: 2
 				});
 			}
 		});
