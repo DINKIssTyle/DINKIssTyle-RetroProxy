@@ -1707,17 +1707,17 @@ func (s *Server) handleInputUI(w http.ResponseWriter, r *http.Request) {
 		debugHidden = `<input type="hidden" name="debug" value="1">`
 	}
 
-	html := fmt.Sprintf(`<html>
+	tmpl := `<html>
 <head><title>Input Text</title></head>
 <body bgcolor="#eeeeee">
 <center>
 <h3>Input Text</h3>
 <form method="POST" action="/_drp/action_input">
-<input type="hidden" name="url" value="%%s">
-<input type="hidden" name="xpath" value="%%s">
-<input type="hidden" name="enc" value="%%s">
-%%s
-Field: <b>%%s</b><br><br>
+<input type="hidden" name="url" value="{{URL}}">
+<input type="hidden" name="xpath" value="{{XPATH}}">
+<input type="hidden" name="enc" value="{{ENC}}">
+{{DEBUG}}
+Field: <b>{{NAME}}</b><br><br>
 <input type="text" name="text" size="40"><br><br>
 <input type="submit" name="act" value="Input Only">
 <input type="submit" name="act" value="Input & Enter">
@@ -1725,7 +1725,14 @@ Field: <b>%%s</b><br><br>
 </form>
 </center>
 </body>
-</html>`, targetURL, xpathEnc, encoding, debugHidden, name)
+</html>`
+
+	html := tmpl
+	html = strings.Replace(html, "{{URL}}", targetURL, 1)
+	html = strings.Replace(html, "{{XPATH}}", xpathEnc, 1)
+	html = strings.Replace(html, "{{ENC}}", encoding, 1)
+	html = strings.Replace(html, "{{DEBUG}}", debugHidden, 1)
+	html = strings.Replace(html, "{{NAME}}", name, 1)
 
 	content, _ := s.encoder.ConvertToEncoding(html, encoding)
 	contentType := fmt.Sprintf("text/html; charset=%s", encoding)
