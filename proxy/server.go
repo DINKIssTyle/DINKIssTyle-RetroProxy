@@ -1699,6 +1699,9 @@ func (s *Server) handleInputUI(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	debugMode := r.URL.Query().Get("debug")
 
+	browserInfo := s.encoder.DetectLegacyBrowser(r.UserAgent())
+	encoding := browserInfo.Encoding
+
 	debugHidden := ""
 	if debugMode == "1" {
 		debugHidden = `<input type="hidden" name="debug" value="1">`
@@ -1710,10 +1713,11 @@ func (s *Server) handleInputUI(w http.ResponseWriter, r *http.Request) {
 <center>
 <h3>Input Text</h3>
 <form method="POST" action="/_drp/action_input">
-<input type="hidden" name="url" value="%s">
-<input type="hidden" name="xpath" value="%s">
-%s
-Field: <b>%s</b><br><br>
+<input type="hidden" name="url" value="%%s">
+<input type="hidden" name="xpath" value="%%s">
+<input type="hidden" name="enc" value="%%s">
+%%s
+Field: <b>%%s</b><br><br>
 <input type="text" name="text" size="40"><br><br>
 <input type="submit" name="act" value="Input Only">
 <input type="submit" name="act" value="Input & Enter">
@@ -1721,9 +1725,13 @@ Field: <b>%s</b><br><br>
 </form>
 </center>
 </body>
-</html>`, targetURL, xpathEnc, debugHidden, name)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(html))
+</html>`, targetURL, xpathEnc, encoding, debugHidden, name)
+
+	content, _ := s.encoder.ConvertToEncoding(html, encoding)
+	contentType := fmt.Sprintf("text/html; charset=%s", encoding)
+
+	w.Header().Set("Content-Type", contentType)
+	w.Write(content)
 }
 
 // handleInputAction processes the input submission
@@ -1735,9 +1743,13 @@ func (s *Server) handleInputAction(w http.ResponseWriter, r *http.Request) {
 
 	targetURL := r.FormValue("url")
 	xpathEnc := r.FormValue("xpath")
-	text := r.FormValue("text")
+	encoding := r.FormValue("enc")
+	textRaw := r.FormValue("text")
 	action := r.FormValue("act")
 	debugMode := r.FormValue("debug") == "1"
+
+	// Convert input text from legacy encoding to UTF-8
+	text, _ := s.encoder.ConvertFromEncoding([]byte(textRaw), encoding)
 
 	if action == "Cancel" {
 		if debugMode {

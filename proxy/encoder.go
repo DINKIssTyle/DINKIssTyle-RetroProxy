@@ -173,6 +173,23 @@ func (e *Encoder) ConvertToEncoding(html string, encodingName string) ([]byte, e
 	return buf.Bytes(), nil
 }
 
+// ConvertFromEncoding converts data from specified encoding to UTF-8
+func (e *Encoder) ConvertFromEncoding(data []byte, encodingName string) (string, error) {
+	enc := e.getEncoder(encodingName)
+	if enc == nil {
+		return string(data), nil
+	}
+
+	// Convert from encoding to UTF-8
+	decoder := enc.NewDecoder()
+	result, _, err := transform.Bytes(decoder, data)
+	if err != nil {
+		return string(data), err
+	}
+
+	return string(result), nil
+}
+
 // getEncoder returns the encoding for the given name
 func (e *Encoder) getEncoder(encodingName string) encoding.Encoding {
 	switch strings.ToLower(encodingName) {
