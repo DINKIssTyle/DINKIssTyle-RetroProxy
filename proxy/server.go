@@ -486,7 +486,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var html string
 
 	if mode == "image" {
-		html, err = s.renderImageMode(r.Context(), targetURL, false)
+		html, err = s.renderImageMode(r.Context(), targetURL, false, r.UserAgent())
 		if err != nil {
 			// Check if renderer is busy
 			if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
@@ -699,7 +699,7 @@ func (s *Server) handleDebugView(w http.ResponseWriter, r *http.Request) {
 	if mode == "image" {
 		// Image Map Mode
 		renderStart := time.Now()
-		html, err = s.renderImageMode(r.Context(), targetURL, true)
+		html, err = s.renderImageMode(r.Context(), targetURL, true, r.UserAgent())
 		duration := time.Since(renderStart)
 		if err != nil {
 			if errors.Is(err, ErrRendererBusy) || errors.Is(err, context.Canceled) {
@@ -1375,7 +1375,7 @@ func (s *Server) Close() error {
 }
 
 // renderImageMode captures screenshot, slices it, and returns HTML with image map
-func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMode bool) (html string, err error) {
+func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMode bool, userAgent string) (html string, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			s.log(fmt.Sprintf("Panic in renderImageMode: %v", rec))
@@ -1419,10 +1419,15 @@ func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMod
 	// Render Image Tiles
 	sb.WriteString(`<div align="center">`)
 
-	// Add fixed refresh button
-	sb.WriteString(`<div style="position:fixed;top:5px;left:5px;z-index:9999;">
-		<button onclick="window.location.reload()" style="font-size:12px;cursor:pointer;background:#eee;border:1px solid #999;">Refresh View</button>
-	</div>`)
+	// Add fixed refresh button (Skip for NC3/IE4 as they don't support position:fixed well or are too old)
+	browserInfo := s.encoder.DetectLegacyBrowser(userAgent)
+	isTooLegacy := strings.Contains(browserInfo.Name, "Netscape 2-3") || strings.Contains(browserInfo.Name, "Internet Explorer")
+
+	if !isTooLegacy {
+		sb.WriteString(`<div style="position:fixed;top:5px;left:5px;z-index:9999;">
+			<button onclick="window.location.reload()" style="font-size:12px;cursor:pointer;background:#eee;border:1px solid #999;">Refresh View</button>
+		</div>`)
+	}
 
 	for i, tile := range tiles {
 		imgSrc := fmt.Sprintf("/_drp/tile/%s/%d", uuid, i)

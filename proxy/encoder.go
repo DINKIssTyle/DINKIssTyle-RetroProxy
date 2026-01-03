@@ -98,9 +98,9 @@ func (e *Encoder) DetectLegacyBrowser(userAgent string) LegacyBrowserInfo {
 		return LegacyBrowserInfo{IsLegacy: true, Encoding: "euc-kr", Name: "Mosaic"}
 	}
 
-	// Internet Explorer 3-4 (IE5+ supports UTF-8)
-	if strings.Contains(ua, "msie 1") || strings.Contains(ua, "msie 3") {
-		return LegacyBrowserInfo{IsLegacy: true, Encoding: "euc-kr", Name: "Internet Explorer 3-4"}
+	// Internet Explorer 1, 3, 4 (IE5+ supports UTF-8)
+	if strings.Contains(ua, "msie 1") || strings.Contains(ua, "msie 3") || strings.Contains(ua, "msie 4") {
+		return LegacyBrowserInfo{IsLegacy: true, Encoding: "euc-kr", Name: "Internet Explorer 1-4"}
 	}
 
 	// Opera 3-6 (Opera 7+ has better UTF-8)
