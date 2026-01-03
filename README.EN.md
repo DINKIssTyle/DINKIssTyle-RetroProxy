@@ -45,6 +45,25 @@ It renders sites built with the latest web technologies (HTML5, CSS3, JS) using 
 *   **Remote Management Page**: You can access settings or shut down the server by visiting `http://server`, `http://setting`, or `http://settings` from the client browser.
 *   **Debug Toolbar**: Provides a toolbar at the top of converted pages to check the original URL and change encoding/modes.
 
+### 4. Command Line Arguments
+You can run the app with the following arguments in the terminal:
+
+*   **`-start`**: Automatically starts the server on startup.
+*   **`-p [port]`**: Specifies the server port. (Default: 8080)
+*   **`-e [encoding]`**: Forces a page encoding. (utf-8, euc-kr, etc.)
+*   **`-m [mode]`**: Specifies the rendering mode.
+    *   `nossl`: Modern (No SSL)
+    *   `html32`: HTML 3.2 (Legacy, Table Layout)
+    *   `html32new`: HTML 3.2 New (Layout-based)
+    *   `html401`: HTML 4.01 (Standard, Div Layout)
+    *   `textonly`: Text Only
+    *   `imagemap`: Image Map
+*   **`-i [format]`**: Specifies the image conversion format. (original, jpeg, gif, png)
+*   **`-stop`**: Remotely stops the proxy server of a running instance on a specific port. (Identifies instance by `-p` port)
+*   **`-quit`**: Remotely shuts down a running application instance on a specific port safely. (Identifies instance by `-p` port)
+
+---
+
 ---
 
 ## 🏗️ Build

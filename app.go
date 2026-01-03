@@ -1,3 +1,5 @@
+// Created by DINKIssTyle on 2026. Copyright (C) 2026 DINKI'ssTyle. All rights reserved.
+
 package main
 
 import (
@@ -9,19 +11,33 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// AppConfig holds initial configuration from command line
+type AppConfig struct {
+	StartServer bool
+	Port        int
+	Encoding    string
+	Mode        string
+	ImageFormat string
+	StopServer  bool
+	QuitApp     bool
+	SetFlags    map[string]bool // Tracks which flags were actually provided
+}
+
 // App struct
 type App struct {
 	ctx    context.Context
 	server *proxy.Server
 	logs   []string
 	logMu  sync.RWMutex
+	config AppConfig
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp(config AppConfig) *App {
 	return &App{
 		server: proxy.NewServer(),
 		logs:   make([]string, 0, 100),
+		config: config,
 	}
 }
 
@@ -40,7 +56,62 @@ func (a *App) startup(ctx context.Context) {
 		a.server.Start(port)
 		a.addLog("Server restarted")
 	})
+
+	// Apply initial settings from config (only if explicitly set or non-default)
+	if a.config.SetFlags["e"] {
+		a.server.SetEncoding(a.config.Encoding)
+		a.addLog(fmt.Sprintf("Initial encoding set to: %s", a.config.Encoding))
+	}
+
+	if a.config.SetFlags["i"] {
+		a.server.SetImageFormat(a.config.ImageFormat)
+		a.addLog(fmt.Sprintf("Initial image format set to: %s", a.config.ImageFormat))
+	}
+
+	if a.config.SetFlags["m"] {
+		internalMode := ""
+		switch a.config.Mode {
+		case "nossl":
+			internalMode = "modern"
+		case "html32":
+			internalMode = "3.2"
+		case "html32new":
+			internalMode = "3.2new"
+		case "html401":
+			internalMode = "4.01"
+		case "textonly":
+			internalMode = "text"
+		case "imagemap":
+			internalMode = "image"
+		default:
+			internalMode = a.config.Mode
+		}
+		a.server.SetHTMLVersion(internalMode)
+		a.addLog(fmt.Sprintf("Initial mode set to: %s (%s)", a.config.Mode, internalMode))
+	}
+
 	a.addLog("Application started")
+
+	// Quit if requested
+	if a.config.QuitApp {
+		a.addLog("Quit requested via command line")
+		runtime.Quit(a.ctx)
+		return
+	}
+
+	// Start proxy if requested (and not stopping)
+	// For backward compatibility or ease of use, we check StartServer even if not in SetFlags,
+	// but usually user will pass -start to make it true.
+	if a.config.StartServer && !a.config.StopServer {
+		port := a.config.Port
+		// If port 8080 is default but user didn't set it, it's still 8080.
+		err := a.server.Start(port)
+		if err != nil {
+			a.addLog(fmt.Sprintf("Failed to auto-start server: %v", err))
+		} else {
+			a.addLog(fmt.Sprintf("Proxy server auto-started on port %d", port))
+		}
+	}
 }
 
 // shutdown is called when the app is closing

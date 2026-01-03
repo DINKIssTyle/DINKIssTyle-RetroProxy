@@ -51,6 +51,25 @@
 *   **원격 관리 페이지**: 클라이언트 브라우저에서 `http://server`, `http://setting`, `http://settings`에 접속하여 설정을 변경하거나 서버를 종료할 수 있습니다.
 *   **디버그 툴바**: 변환된 페이지 상단에 원본 URL 확인 및 인코딩/모드 변경 툴바를 제공합니다.
 
+### 4. 커맨드라인 인수 (Command Line Arguments)
+터미널에서 다음과 같은 인수를 사용하여 앱을 실행할 수 있습니다.
+
+*   **`-start`**: 앱 실행 시 서버를 자동으로 시작합니다.
+*   **`-p [포트번호]`**: 서버 포트를 지정합니다. (기본값: 8080)
+*   **`-e [인코딩]`**: 페이지 인코딩을 강제 지정합니다. (utf-8, euc-kr 등)
+*   **`-m [모드]`**: 렌더링 모드를 지정합니다.
+    *   `nossl`: Modern (No SSL)
+    *   `html32`: HTML 3.2 (Legacy, Table Layout)
+    *   `html32new`: HTML 3.2 New (Layout-based)
+    *   `html401`: HTML 4.01 (Standard, Div Layout)
+    *   `textonly`: Text Only
+    *   `imagemap`: Image Map
+*   **`-i [이미지]`**: 이미지 변환 형식을 지정합니다. (original, jpeg, gif, png)
+*   **`-stop`**: 실행 중인 특정 포트의 서버를 원격으로 중지합니다. (`-p`로 지정한 포트의 인스턴스를 식별합니다)
+*   **`-quit`**: 실행 중인 특정 포트의 앱을 원격으로 안전하게 종료합니다. (`-p`로 지정한 포트의 인스턴스를 식별합니다)
+
+---
+
 ---
 
 ## 🏗️ 빌드 방법 (Build)

@@ -148,6 +148,10 @@ func (p *RendererPool) IsBusy() bool {
 // Close closes all renderers in the pool
 func (p *RendererPool) Close() error {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
 	p.closed = true
 	p.mu.Unlock()
 

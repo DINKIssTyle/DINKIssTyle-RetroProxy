@@ -389,6 +389,12 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle control API endpoint - /_drp/control
+	if strings.HasPrefix(r.URL.Path, "/_drp/control") {
+		s.handleControlAPI(w, r)
+		return
+	}
+
 	// Handle input UI - /_drp/input
 	if strings.HasPrefix(r.URL.Path, "/_drp/input") {
 		s.handleInputUI(w, r)
@@ -633,6 +639,34 @@ func (s *Server) handleDebugAPI(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, nextURL, http.StatusFound)
 	} else {
 		w.Write([]byte("Settings updated"))
+	}
+}
+
+// handleControlAPI handles remote control requests (stop, quit)
+func (s *Server) handleControlAPI(w http.ResponseWriter, r *http.Request) {
+	action := r.URL.Query().Get("action")
+	switch action {
+	case "stop":
+		s.log("Remote control: Stop server requested")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("Proxy server is stopping..."))
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			s.Stop()
+		}()
+	case "quit":
+		s.log("Remote control: Quit application requested")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("Application is shutting down..."))
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			if s.shutdownCallback != nil {
+				s.shutdownCallback()
+			}
+		}()
+	default:
+		s.log(fmt.Sprintf("Remote control: Invalid action requested: %s", action))
+		http.Error(w, "Invalid action", http.StatusBadRequest)
 	}
 }
 
@@ -1334,7 +1368,7 @@ func (s *Server) resolveURL(href string, base *url.URL) string {
 
 // Close cleans up resources
 func (s *Server) Close() error {
-	if s.running {
+	if s.IsRunning() {
 		s.Stop()
 	}
 	return s.rendererPool.Close()
