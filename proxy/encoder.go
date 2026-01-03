@@ -85,12 +85,15 @@ func (e *Encoder) DetectLegacyBrowser(userAgent string) LegacyBrowserInfo {
 
 	ua := strings.ToLower(userAgent)
 
-	// Netscape Navigator 2-3 (doesn't support UTF-8)
-	if strings.Contains(ua, "mozilla/") && !strings.Contains(ua, "gecko") && !strings.Contains(ua, "msie") {
+	// Netscape Navigator 2-4
+	if strings.Contains(ua, "mozilla/") && !strings.Contains(ua, "gecko") && !strings.Contains(ua, "msie") && !strings.Contains(ua, "opera") {
 		if strings.Contains(ua, "mozilla/2") || strings.Contains(ua, "mozilla/3") {
 			return LegacyBrowserInfo{IsLegacy: true, Encoding: "euc-kr", Name: "Netscape 2-3"}
 		}
-		// NC4+ supports UTF-8
+		if strings.Contains(ua, "mozilla/4") {
+			// NC4 supports UTF-8, but we name it for UI logic
+			return LegacyBrowserInfo{IsLegacy: false, Encoding: "utf-8", Name: "Netscape 4"}
+		}
 	}
 
 	// Mosaic

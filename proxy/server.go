@@ -1419,9 +1419,9 @@ func (s *Server) renderImageMode(ctx context.Context, targetURL string, debugMod
 	// Render Image Tiles
 	sb.WriteString(`<div align="center">`)
 
-	// Add fixed refresh button (Skip for NC3/IE4 as they don't support position:fixed well or are too old)
+	// Add fixed refresh button (Skip for NC3/NC4/IE4 as they don't support position:fixed well or are too old)
 	browserInfo := s.encoder.DetectLegacyBrowser(userAgent)
-	isTooLegacy := strings.Contains(browserInfo.Name, "Netscape 2-3") || strings.Contains(browserInfo.Name, "Internet Explorer")
+	isTooLegacy := strings.Contains(browserInfo.Name, "Netscape") || strings.Contains(browserInfo.Name, "Internet Explorer")
 
 	if !isTooLegacy {
 		sb.WriteString(`<div style="position:fixed;top:5px;left:5px;z-index:9999;">
