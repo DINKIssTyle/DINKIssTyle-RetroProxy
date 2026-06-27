@@ -1,10 +1,12 @@
+// Created by DINKIssTyle on 2026. Copyright (C) 2026 DINKI'ssTyle. All rights reserved.
+
 package proxy
 
 import (
 	"bytes"
 	"image"
 	"image/jpeg"
-	"image/png"
+	_ "image/png"
 )
 
 // Tile represents a sliced image part
@@ -14,10 +16,10 @@ type Tile struct {
 	H    int // Height
 }
 
-// SliceImage takes PNG data and slices it into vertical tiles of max height
-func SliceImage(pngData []byte, maxTileHeight int) ([]Tile, int, int, error) {
-	// Decode PNG
-	img, err := png.Decode(bytes.NewReader(pngData))
+// SliceImage takes image data (PNG or JPEG) and slices it into vertical tiles of max height
+func SliceImage(imgData []byte, maxTileHeight int) ([]Tile, int, int, error) {
+	// Decode Image (supports JPEG, PNG, etc. automatically)
+	img, _, err := image.Decode(bytes.NewReader(imgData))
 	if err != nil {
 		return nil, 0, 0, err
 	}

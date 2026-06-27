@@ -1,4 +1,4 @@
-// Created by DINKIssTyle on 2025. Copyright (C) 2025 DINKI'ssTyle. All rights reserved.
+// Created by DINKIssTyle on 2026. Copyright (C) 2026 DINKI'ssTyle. All rights reserved.
 
 package proxy
 
@@ -787,12 +787,26 @@ func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction 
 	info, _ := page.Info()
 	currentURL = info.URL
 
-	// 1. Measure Full Height
-	// Scroll to bottom to trigger lazy loads
-	page.Eval(`() => window.scrollTo(0, document.body.scrollHeight)`)
-	time.Sleep(500 * time.Millisecond)
-	page.Eval(`() => window.scrollTo(0, 0)`)
-	time.Sleep(200 * time.Millisecond)
+	// 1. Measure Full Height & Trigger lazy loads gradually
+	// Scroll down gradually to trigger lazy-loaded assets
+	_, _ = page.Eval(`async () => {
+		await new Promise((resolve) => {
+			let totalHeight = 0;
+			const distance = 800;
+			const timer = setInterval(() => {
+				const scrollHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+				window.scrollBy(0, distance);
+				totalHeight += distance;
+				if (totalHeight >= scrollHeight) {
+					clearInterval(timer);
+					resolve();
+				}
+			}, 50);
+		});
+		window.scrollTo(0, 0);
+	}`)
+	time.Sleep(300 * time.Millisecond) // Allow images to start loading
+	_ = page.WaitRequestIdle(400*time.Millisecond, nil, nil, nil) // Wait for network requests to finish
 
 	res, err := page.Eval("() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight, document.documentElement.offsetHeight)")
 	if err != nil {
@@ -816,7 +830,34 @@ func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction 
 		err = fmt.Errorf("failed to set viewport (full): %w", err)
 		return
 	}
-	time.Sleep(200 * time.Millisecond) // Allow layout to settle
+	time.Sleep(150 * time.Millisecond) // Allow layout to settle
+
+	// Hide scrollbars to prevent them from appearing in screenshots and throwing off coordinates
+	_, _ = page.Eval(`() => {
+		const style = document.createElement('style');
+		style.id = 'drp-hide-scrollbars';
+		style.innerHTML = 'html, body { overflow: hidden !important; }';
+		document.head.appendChild(style);
+	}`)
+	time.Sleep(50 * time.Millisecond) // Allow style changes to take effect
+
+	// After hiding scrollbars and resizing, the document height might change (e.g. text wraps differently, or more content is revealed)
+	// We measure the height again to ensure the viewport perfectly matches the content size
+	res2, err := page.Eval("() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, document.body.offsetHeight, document.documentElement.offsetHeight)")
+	if err == nil {
+		actualHeight := int(res2.Value.Int())
+		if actualHeight > MaxHeight {
+			actualHeight = MaxHeight
+		}
+		if actualHeight < 768 {
+			actualHeight = 768
+		}
+		if actualHeight != fullHeight {
+			fullHeight = actualHeight
+			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{Width: 1024, Height: fullHeight, DeviceScaleFactor: 1.0, Mobile: false})
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 
 	// 3. Extract Coordinates (Now consistent because viewport covers everything)
 	jsScript := `() => {
@@ -827,8 +868,8 @@ func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction 
 				const rect = a.getBoundingClientRect();
 				if (rect.width > 0 && rect.height > 0) {
 					results.links.push({
-						x: rect.left, // No scroll needed since viewport is full
-						y: rect.top,
+						x: rect.left + window.pageXOffset,
+						y: rect.top + window.pageYOffset,
 						w: rect.width,
 						h: rect.height,
 						href: a.href
@@ -864,8 +905,8 @@ func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction 
 					}
 					
 					results.inputs.push({
-						x: rect.left,
-						y: rect.top,
+						x: rect.left + window.pageXOffset,
+						y: rect.top + window.pageYOffset,
 						w: rect.width,
 						h: rect.height,
 						name: inp.name || inp.placeholder || 'input',
@@ -903,10 +944,12 @@ func (r *Renderer) captureLogic(ctx context.Context, urlStr string, interaction 
 	}
 
 	// 4. Capture Full Page Screenshot
-	// We use PNG for raw capture to avoid compression artifacts before slicing
-	// Server side will slice and compress to JPEG
-	imageData, err = page.Screenshot(true, &proto.PageCaptureScreenshot{
-		Format: proto.PageCaptureScreenshotFormatPng,
+	// We use JPEG with high quality and disable fullPage screenshot (false)
+	// because the viewport is already resized to the full height.
+	quality := 90
+	imageData, err = page.Screenshot(false, &proto.PageCaptureScreenshot{
+		Format:  proto.PageCaptureScreenshotFormatJpeg,
+		Quality: &quality,
 	})
 	if err != nil {
 		err = fmt.Errorf("failed to capture screenshot: %w", err)
