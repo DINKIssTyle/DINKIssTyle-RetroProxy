@@ -47,6 +47,7 @@ body {
     display: inline-flex;
     align-items: center;
     gap: .4rem;
+    font-family: Chicago_12, Chicago, sans-serif;
 }
 
 .app-details-bar {
@@ -83,7 +84,7 @@ body {
     padding: 0 7px;
     background: #fff;
     font-family: Chicago_12, Chicago, sans-serif;
-    font-size: 17px;
+    font-size: 18px;
 }
 
 .settings-grid {
@@ -94,7 +95,7 @@ body {
 
 .settings-row {
     display: grid;
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 92px minmax(0, 1fr);
     align-items: center;
     gap: 6px;
     min-width: 0;
@@ -103,7 +104,7 @@ body {
 .settings-row > span,
 .debug-row > span {
     font-family: Chicago_12, Chicago, sans-serif;
-    font-size: 15px;
+    font-size: 18px;
     text-align: right;
 }
 
@@ -135,7 +136,7 @@ a:focus-visible {
 
 .debug-row {
     display: grid;
-    grid-template-columns: 66px 70px minmax(0, 1fr);
+    grid-template-columns: 92px 70px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     min-height: 32px;
@@ -145,10 +146,7 @@ a:focus-visible {
 }
 
 .btn.compact-btn {
-    min-width: 60px;
-    min-height: 25px;
-    padding: 0 11px;
-    font-size: 15px;
+    min-width: 59px;
 }
 
 .debug-url {
@@ -198,9 +196,7 @@ a:focus-visible {
 }
 
 .button-row .btn {
-    height: 44px;
-    min-height: 44px;
-    min-width: 100px;
+    min-width: 59px;
 }
 
 .log-panel {
@@ -227,7 +223,13 @@ a:focus-visible {
     padding: 1px 7px;
     background: #fff;
     font-family: Chicago_12, Chicago, sans-serif;
-    font-size: 16px;
+    font-size: 18px;
+}
+
+.log-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .log-content {
@@ -239,7 +241,10 @@ a:focus-visible {
     font-family: Monaco, monospace;
     font-size: 18px;
     line-height: 1.3;
-    user-select: text;
+}
+
+.activity-scrollbar {
+    display: none;
 }
 
 .log-entry {
@@ -264,7 +269,12 @@ a:focus-visible {
     justify-content: space-between;
     flex: 0 0 auto;
     padding: 6px 2px 0;
-    font-size: 11px;
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    font-size: 18px;
+}
+
+.footer-bar > span:last-child {
+    font-family: Chicago_12, Chicago, sans-serif;
 }
 
 .startup-option {
@@ -275,23 +285,14 @@ a:focus-visible {
 
 .startup-option label {
     font-family: Geneva_9, Geneva, Arial, sans-serif;
-    font-size: 24px;
+    font-size: 18px;
 }
 
 .theme-toggle {
     min-width: 0;
-    padding: 0 4px;
-    border: 1px solid #000;
-    background: #fff;
-    color: #000;
-    font-family: Geneva_9, Geneva, Arial, sans-serif;
-    font-size: 24px;
-    cursor: pointer;
-}
-
-.theme-toggle:active {
-    background: #000;
-    color: #fff;
+    padding-right: 8px;
+    padding-left: 8px;
+    font-family: Chicago_12, Chicago, sans-serif;
 }
 
 @media (max-width: 470px) {

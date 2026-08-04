@@ -5,10 +5,19 @@ body,
     height: 100%;
     margin: 0;
     overflow: hidden;
+    border-radius: 0;
 }
 
-body {
+body,
+#app,
+#app * {
+    -webkit-user-select: none;
     user-select: none;
+}
+
+#app #portNumber {
+    -webkit-user-select: text;
+    user-select: text;
 }
 
 button,
@@ -22,6 +31,11 @@ a {
 .app-titlebar {
     --wails-draggable: drag;
     --wails-non-client-region: caption;
+}
+
+.app-desktop,
+.app-window {
+    border-radius: 0;
 }
 
 .app-titlebar .title,

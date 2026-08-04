@@ -115,8 +115,17 @@ document.querySelector('#app').innerHTML = `
                         <h2 id="logTitle">Activity Log</h2>
                         <button class="btn compact-btn" id="clearBtn">Clear</button>
                     </div>
-                    <div class="log-content" id="logContent" role="log" aria-live="polite">
-                        <div class="log-empty">No activity.</div>
+                    <div class="log-body">
+                        <div class="log-content" id="logContent" role="log" aria-live="polite">
+                            <div class="log-empty">No activity.</div>
+                        </div>
+                        <div class="vertical-scrollbar activity-scrollbar" id="activityScrollbar">
+                            <button type="button" id="logScrollUpBtn" aria-label="Scroll activity log up"></button>
+                            <div class="scrollbar-track" id="logScrollbarTrack">
+                                <div class="scrollbar-thumb" id="logScrollbarThumb"></div>
+                            </div>
+                            <button type="button" id="logScrollDownBtn" aria-label="Scroll activity log down"></button>
+                        </div>
                     </div>
                 </section>
 
@@ -125,7 +134,7 @@ document.querySelector('#app').innerHTML = `
                         <input type="checkbox" id="launchAtStartupInput" />
                         <label for="launchAtStartupInput">Launch at startup</label>
                     </span>
-                    <button class="theme-toggle" id="themeToggleBtn" type="button"></button>
+                    <button class="btn theme-toggle" id="themeToggleBtn" type="button"></button>
                     <span>© 2026 DINKI'ssTyle</span>
                 </footer>
             </div>
@@ -142,6 +151,10 @@ const debugBtn = document.getElementById('debugBtn');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const logContent = document.getElementById('logContent');
+const logScrollUpBtn = document.getElementById('logScrollUpBtn');
+const logScrollDownBtn = document.getElementById('logScrollDownBtn');
+const logScrollbarTrack = document.getElementById('logScrollbarTrack');
+const logScrollbarThumb = document.getElementById('logScrollbarThumb');
 const encodingSelect = document.getElementById('encodingSelect');
 
 const imageSelect = document.getElementById('imageSelect');
@@ -206,6 +219,11 @@ winCloseWindowBtn.addEventListener('click', () => Window.Close());
 winZoomWindowBtn.addEventListener('click', () => Window.ToggleMaximise());
 themeToggleBtn.addEventListener('click', toggleTheme);
 launchAtStartupInput.addEventListener('change', updateLaunchAtStartup);
+logScrollUpBtn.addEventListener('click', () => scrollActivityLog(-getActivityLogStep()));
+logScrollDownBtn.addEventListener('click', () => scrollActivityLog(getActivityLogStep()));
+logScrollbarTrack.addEventListener('click', pageActivityLog);
+logScrollbarThumb.addEventListener('pointerdown', startActivityLogThumbDrag);
+logContent.addEventListener('scroll', updateActivityScrollbar);
 windowTitlebar.addEventListener('dblclick', (event) => {
     if (!event.target.closest('button')) Window.ToggleMaximise();
 });
@@ -223,7 +241,73 @@ function applyTheme(themeName) {
             ? `Random mode selected; this launch uses ${themes[currentTheme].label}`
             : `${themes[currentTheme].label} selected`;
     }
+    if (document.getElementById('logContent')) {
+        requestAnimationFrame(updateActivityScrollbar);
+    }
 }
+
+function getActivityLogStep() {
+    const lineHeight = parseFloat(getComputedStyle(logContent).lineHeight);
+    return Number.isFinite(lineHeight) ? lineHeight * 3 : 48;
+}
+
+function scrollActivityLog(amount) {
+    logContent.scrollTop += amount;
+    updateActivityScrollbar();
+}
+
+function updateActivityScrollbar() {
+    const trackHeight = logScrollbarTrack.clientHeight;
+    if (trackHeight <= 0) return;
+
+    const maxScroll = Math.max(0, logContent.scrollHeight - logContent.clientHeight);
+    const visibleRatio = logContent.scrollHeight > 0
+        ? logContent.clientHeight / logContent.scrollHeight
+        : 1;
+    const thumbHeight = maxScroll > 0
+        ? Math.max(16, Math.round(trackHeight * visibleRatio))
+        : trackHeight;
+    const travel = Math.max(0, trackHeight - thumbHeight);
+    const thumbTop = maxScroll > 0
+        ? Math.round((logContent.scrollTop / maxScroll) * travel)
+        : 0;
+
+    logScrollbarThumb.style.height = `${thumbHeight}px`;
+    logScrollbarThumb.style.top = `${thumbTop}px`;
+}
+
+function pageActivityLog(event) {
+    if (event.target !== logScrollbarTrack) return;
+    const thumbRect = logScrollbarThumb.getBoundingClientRect();
+    scrollActivityLog(event.clientY < thumbRect.top
+        ? -logContent.clientHeight
+        : logContent.clientHeight);
+}
+
+function startActivityLogThumbDrag(event) {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startScrollTop = logContent.scrollTop;
+
+    const moveThumb = (moveEvent) => {
+        const trackTravel = logScrollbarTrack.clientHeight - logScrollbarThumb.offsetHeight;
+        const maxScroll = logContent.scrollHeight - logContent.clientHeight;
+        if (trackTravel <= 0 || maxScroll <= 0) return;
+        logContent.scrollTop = startScrollTop
+            + ((moveEvent.clientY - startY) / trackTravel) * maxScroll;
+    };
+    const stopDragging = () => {
+        window.removeEventListener('pointermove', moveThumb);
+        window.removeEventListener('pointerup', stopDragging);
+        window.removeEventListener('pointercancel', stopDragging);
+    };
+
+    window.addEventListener('pointermove', moveThumb);
+    window.addEventListener('pointerup', stopDragging);
+    window.addEventListener('pointercancel', stopDragging);
+}
+
+new ResizeObserver(updateActivityScrollbar).observe(logContent);
 
 function toggleTheme() {
     const currentIndex = themeModes.indexOf(currentThemeMode);
@@ -432,6 +516,7 @@ async function clearLogs() {
     try {
         await ClearLogs();
         logContent.innerHTML = '<div class="log-empty">No activity.</div>';
+        requestAnimationFrame(updateActivityScrollbar);
     } catch (err) {
         console.error(err);
     }
@@ -448,6 +533,7 @@ function addLog(msg) {
 
     logContent.appendChild(entry);
     logContent.scrollTop = logContent.scrollHeight;
+    requestAnimationFrame(updateActivityScrollbar);
 }
 
 async function updateLogs() {
@@ -466,6 +552,7 @@ async function updateLogs() {
                 logContent.appendChild(entry);
             }
             logContent.scrollTop = logContent.scrollHeight;
+            requestAnimationFrame(updateActivityScrollbar);
         }
     } catch (err) {
         console.error(err);

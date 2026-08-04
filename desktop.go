@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -12,10 +13,15 @@ import (
 func (a *App) configureDesktop(window application.Window, macIcon, linuxIcon, windowsIcon []byte) {
 	a.mainWindow = window
 
-	applicationMenu := a.application.NewMenu()
-	serverMenu := applicationMenu.AddSubmenu("Server")
-	a.populateServerMenu(serverMenu)
-	a.application.Menu.SetApplicationMenu(applicationMenu)
+	// GTK currently embeds the global application menu as an extra in-window
+	// menu bar even for a frameless window. Linux keeps these actions in the
+	// tray menu instead.
+	if runtime.GOOS != "linux" {
+		applicationMenu := a.application.NewMenu()
+		serverMenu := applicationMenu.AddSubmenu("Server")
+		a.populateServerMenu(serverMenu)
+		a.application.Menu.SetApplicationMenu(applicationMenu)
+	}
 
 	a.configurePlatformTray(macIcon, linuxIcon, windowsIcon)
 

@@ -115,7 +115,8 @@ func main() {
 			CornerType: application.MacWindowCornerTypeSquare,
 		},
 		Windows: application.WindowsWindow{
-			NonClientRegionSupport: true,
+			NonClientRegionSupport:            true,
+			DisableFramelessWindowDecorations: true,
 		},
 	})
 	appService.configureDesktop(mainWindow, trayIconDarwinPNG, trayIconLinuxPNG, trayIconWindowsICO)
