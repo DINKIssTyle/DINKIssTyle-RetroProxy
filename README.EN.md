@@ -91,7 +91,7 @@ chmod +x build.sh
 ./build.sh
 ```
 
-When the build is complete, the executable file will be created in the `build/bin` directory.
+When the build is complete, the executable file will be created in the `bin` directory.
 
 ---
 

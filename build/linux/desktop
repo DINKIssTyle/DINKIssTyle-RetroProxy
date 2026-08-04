@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=DKST RetroProxy
+Comment=Modern websites for legacy browsers
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/RetroProxy %u
+Terminal=false
+Type=Application
+Icon=RetroProxy
+Categories=Utility;
+StartupWMClass=RetroProxy
+
+ 

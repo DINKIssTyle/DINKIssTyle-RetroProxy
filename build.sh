@@ -79,14 +79,14 @@ fi
 NODE_VERSION=$(node --version)
 echo "       Found Node.js $NODE_VERSION"
 
-# Check Wails CLI
+# Check Wails v3 CLI
 echo "[3/3] Checking Wails CLI installation..."
-if ! command_exists wails; then
+if ! command_exists wails3; then
     echo "       Wails CLI not found. Installing..."
-    go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    go install github.com/wailsapp/wails/v3/cmd/wails3@latest
     # Add Go bin to PATH for this session
     export PATH="$PATH:$(go env GOPATH)/bin"
-    if ! command_exists wails; then
+    if ! command_exists wails3; then
         echo "[ERROR] Wails installed but not in PATH. Add this to your shell profile:"
         echo "        export PATH=\$PATH:\$(go env GOPATH)/bin"
         exit 1
@@ -131,19 +131,14 @@ cd ..
 
 # Build the application
 echo "Building application..."
-if [ "$WEBKIT_VERSION" = "4.1" ]; then
-    echo "       Using webkit2gtk-4.1 (Ubuntu 22.04+)"
-    wails build -tags webkit2_41
-else
-    wails build
-fi
+wails3 build
 
 echo ""
 echo "============================================"
 echo "  Build completed successfully!"
 if [ "$PLATFORM" = "macOS" ]; then
-    echo "  Output: build/bin/RetroProxy.app"
+    echo "  Output: bin/RetroProxy"
 else
-    echo "  Output: build/bin/RetroProxy"
+    echo "  Output: bin/RetroProxy"
 fi
 echo "============================================"

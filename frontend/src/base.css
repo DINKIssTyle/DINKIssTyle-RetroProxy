@@ -1,0 +1,43 @@
+html,
+body,
+#app {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    user-select: none;
+}
+
+button,
+input,
+select,
+a {
+    -webkit-user-drag: none;
+    --wails-draggable: no-drag;
+}
+
+.app-titlebar {
+    --wails-draggable: drag;
+    --wails-non-client-region: caption;
+}
+
+.app-titlebar .title,
+.app-titlebar .title-bar-text {
+    --wails-draggable: drag;
+}
+
+.app-titlebar .window-control {
+    --wails-draggable: no-drag;
+}
+
+.app-titlebar [aria-label="Close window"] {
+    --wails-non-client-region: close;
+}
+
+.app-titlebar [aria-label="Zoom window"],
+.app-titlebar [aria-label="Maximize window"] {
+    --wails-non-client-region: maximize;
+}

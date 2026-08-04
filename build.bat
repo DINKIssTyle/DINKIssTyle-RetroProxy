@@ -31,12 +31,12 @@ if %ERRORLEVEL% NEQ 0 (
 for /f "tokens=1" %%i in ('node --version') do set NODE_VERSION=%%i
 echo        Found Node.js %NODE_VERSION%
 
-REM Check Wails CLI
+REM Check Wails v3 CLI
 echo [3/3] Checking Wails CLI installation...
-where wails >nul 2>&1
+where wails3 >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo        Wails CLI not found. Installing...
-    go install github.com/wailsapp/wails/v2/cmd/wails@latest
+    go install github.com/wailsapp/wails/v3/cmd/wails3@latest
     if %ERRORLEVEL% NEQ 0 (
         echo [ERROR] Failed to install Wails CLI.
         pause
@@ -44,7 +44,7 @@ if %ERRORLEVEL% NEQ 0 (
     )
     echo        Wails CLI installed successfully.
 ) else (
-    for /f "tokens=3" %%i in ('wails version') do set WAILS_VERSION=%%i
+    for /f "tokens=1" %%i in ('wails3 version') do set WAILS_VERSION=%%i
     echo        Found Wails CLI
 )
 
@@ -68,7 +68,7 @@ cd ..
 
 REM Build the application
 echo Building application...
-wails build
+wails3 build
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Build failed.
     pause
@@ -78,6 +78,6 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo ============================================
 echo   Build completed successfully!
-echo   Output: build\bin\RetroProxy.exe
+echo   Output: bin\RetroProxy.exe
 echo ============================================
 pause

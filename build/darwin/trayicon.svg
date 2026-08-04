@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">
+  <!-- Monochrome template placeholder. Replace trayicon.png with final artwork. -->
+  <path fill="#000" d="M2 2h14v14H2zM4 4v10h10V4z"/>
+  <path fill="#000" d="M5 6h5v1H6v2h4v1H6v3H5zm6 0h2v2h-1V7h-1zm0 4h1v3h-1z"/>
+</svg>

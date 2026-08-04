@@ -7,14 +7,25 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// Replace these platform-specific placeholders with final tray artwork while
+// keeping the file names and formats unchanged.
+//
+//go:embed build/darwin/trayicon.png
+var trayIconDarwinPNG []byte
+
+//go:embed build/linux/trayicon.png
+var trayIconLinuxPNG []byte
+
+//go:embed build/windows/trayicon.ico
+var trayIconWindowsICO []byte
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -74,26 +85,42 @@ func main() {
 		config.SetFlags[f.Name] = true
 	})
 
-	// Create an instance of the app structure
-	app := NewApp(config)
+	appService := NewApp(config)
 
-	// Create application with options
-	err := wails.Run(&options.App{
-		Title:  "DKST RetroProxy",
-		Width:  550,
-		Height: 580,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	app := application.New(application.Options{
+		Name:        "DKST RetroProxy",
+		Description: "Modern websites for legacy browsers",
+		Services: []application.Service{
+			application.NewService(appService),
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
-		Bind: []interface{}{
-			app,
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+	appService.application = app
 
-	if err != nil {
-		println("Error:", err.Error())
+	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "DKST RetroProxy",
+		Width:            600,
+		Height:           650,
+		MinWidth:         430,
+		MinHeight:        520,
+		Frameless:        true,
+		BackgroundColour: application.NewRGBA(255, 255, 255, 255),
+		URL:              "/",
+		Mac: application.MacWindow{
+			CornerType: application.MacWindowCornerTypeSquare,
+		},
+		Windows: application.WindowsWindow{
+			NonClientRegionSupport: true,
+		},
+	})
+	appService.configureDesktop(mainWindow, trayIconDarwinPNG, trayIconLinuxPNG, trayIconWindowsICO)
+
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
 	}
 }

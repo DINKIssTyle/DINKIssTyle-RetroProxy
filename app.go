@@ -8,7 +8,7 @@ import (
 	"oldwebproxy/proxy"
 	"sync"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // AppConfig holds initial configuration from command line
@@ -25,11 +25,16 @@ type AppConfig struct {
 
 // App struct
 type App struct {
-	ctx    context.Context
-	server *proxy.Server
-	logs   []string
-	logMu  sync.RWMutex
-	config AppConfig
+	application *application.App
+	mainWindow  application.Window
+	systemTray  *application.SystemTray
+	server      *proxy.Server
+	logs        []string
+	logMu       sync.RWMutex
+	menuMu      sync.Mutex
+	statusItems []*application.MenuItem
+	toggleItems []*application.MenuItem
+	config      AppConfig
 }
 
 // NewApp creates a new App application struct
@@ -41,13 +46,11 @@ func NewApp(config AppConfig) *App {
 	}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+// ServiceStartup is called by Wails when the application starts.
+func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	a.server.SetLogger(a.addLog)
 	a.server.SetShutdownCallback(func() {
-		runtime.Quit(a.ctx)
+		a.application.Quit()
 	})
 	a.server.SetRestartCallback(func() {
 		port := a.server.GetPort()
@@ -55,6 +58,7 @@ func (a *App) startup(ctx context.Context) {
 		a.server.ForceStop()
 		a.server.Start(port)
 		a.addLog("Server restarted")
+		a.updateServerMenus()
 	})
 
 	// Apply initial settings from config (only if explicitly set or non-default)
@@ -95,8 +99,8 @@ func (a *App) startup(ctx context.Context) {
 	// Quit if requested
 	if a.config.QuitApp {
 		a.addLog("Quit requested via command line")
-		runtime.Quit(a.ctx)
-		return
+		a.application.Quit()
+		return nil
 	}
 
 	// Start proxy if requested (and not stopping)
@@ -112,14 +116,19 @@ func (a *App) startup(ctx context.Context) {
 			a.addLog(fmt.Sprintf("Proxy server auto-started on port %d", port))
 		}
 	}
+	a.updateServerMenus()
+
+	return nil
 }
 
-// shutdown is called when the app is closing
-func (a *App) shutdown(ctx context.Context) {
+// ServiceShutdown is called by Wails when the application is closing.
+func (a *App) ServiceShutdown() error {
 	a.addLog("Application shutting down...")
+	a.destroyPlatformTray()
 	if a.server != nil {
 		a.server.Close()
 	}
+	return nil
 }
 
 // addLog adds a log message
@@ -166,6 +175,7 @@ func (a *App) StartProxy(port int) string {
 
 	msg := fmt.Sprintf("Proxy server started on port %d", port)
 	a.addLog(msg)
+	a.updateServerMenus()
 	return msg
 }
 
@@ -184,7 +194,42 @@ func (a *App) StopProxy() string {
 
 	msg := "Proxy server stopped"
 	a.addLog(msg)
+	a.updateServerMenus()
 	return msg
+}
+
+// GetLaunchAtStartup reports whether the application is registered to launch
+// when the current user signs in.
+func (a *App) GetLaunchAtStartup() (bool, error) {
+	if a.application == nil || a.application.Autostart == nil {
+		return false, fmt.Errorf("autostart is not available")
+	}
+	return a.application.Autostart.IsEnabled()
+}
+
+// SetLaunchAtStartup updates the operating system's per-user startup entry.
+func (a *App) SetLaunchAtStartup(enabled bool) error {
+	if a.application == nil || a.application.Autostart == nil {
+		return fmt.Errorf("autostart is not available")
+	}
+
+	var err error
+	if enabled {
+		err = a.application.Autostart.Enable()
+	} else {
+		err = a.application.Autostart.Disable()
+	}
+	if err != nil {
+		a.addLog(fmt.Sprintf("Failed to update launch at startup: %v", err))
+		return err
+	}
+
+	if enabled {
+		a.addLog("Launch at startup enabled")
+	} else {
+		a.addLog("Launch at startup disabled")
+	}
+	return nil
 }
 
 // GetStatus returns the current server status

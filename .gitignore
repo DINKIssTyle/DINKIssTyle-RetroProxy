@@ -1,6 +1,9 @@
-build/bin
+.task
+bin
 node_modules
 frontend/dist
+build/linux/appimage/build
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 build/.DS_Store
 .DS_Store
 oldwebproxy.exe

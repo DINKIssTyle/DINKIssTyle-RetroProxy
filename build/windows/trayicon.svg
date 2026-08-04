@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Windows tray placeholder. Replace trayicon.ico with final artwork. -->
+  <rect x="2" y="2" width="60" height="60" fill="#000080"/>
+  <rect x="8" y="8" width="48" height="48" fill="#c0c0c0"/>
+  <path fill="#000" d="M14 16h20v6H20v9h14v6H20v11h-6zm25 0h10v6h-4v9h4v6h-4v11h-6z"/>
+  <path fill="#fff" d="M8 8h48v3H11v45H8z"/>
+</svg>
