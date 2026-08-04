@@ -80,55 +80,84 @@ func (s *Server) log(msg string) {
 // Start starts the proxy server on the specified port
 func (s *Server) Start(port int) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.running {
+		s.mu.Unlock()
 		return fmt.Errorf("server is already running")
 	}
 
-	s.port = port
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("failed to listen on port %d: %w", port, err)
+	}
 
-	s.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
+	// RendererPool.Close is intentionally permanent. Stop closes the browser
+	// processes, so every subsequent start needs a fresh pool.
+	if s.rendererPool == nil || s.rendererPool.IsClosed() {
+		s.rendererPool = NewRendererPool(3)
+	}
+
+	actualPort := port
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok {
+		actualPort = tcpAddr.Port
+	}
+	s.port = actualPort
+
+	server := &http.Server{
+		Addr:         listener.Addr().String(),
 		Handler:      http.HandlerFunc(s.handleProxy),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
+	s.server = server
+	s.running = true
+	s.mu.Unlock()
 
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.log(fmt.Sprintf("Server error: %v", err))
+			s.mu.Lock()
+			if s.server == server {
+				s.running = false
+			}
+			s.mu.Unlock()
 		}
 	}()
 
-	s.running = true
-	s.log(fmt.Sprintf("Server started on port %d", port))
+	s.log(fmt.Sprintf("Server started on port %d", actualPort))
 	return nil
 }
 
 // Stop stops the proxy server (graceful with timeout, then force)
 func (s *Server) Stop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return fmt.Errorf("server is not running")
 	}
-
-	// Close all browser processes in the pool
-	s.rendererPool.Close()
+	server := s.server
+	pool := s.rendererPool
+	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := s.server.Shutdown(ctx)
+	err := server.Shutdown(ctx)
 	if err != nil {
 		// Graceful shutdown failed, force close
 		s.log("Graceful shutdown timeout, forcing close...")
-		s.server.Close()
+		_ = server.Close()
 	}
 
-	s.running = false
+	// No request can still be using a renderer after Shutdown completes.
+	_ = pool.Close()
+
+	s.mu.Lock()
+	if s.server == server {
+		s.running = false
+		s.server = nil
+	}
+	s.mu.Unlock()
 	s.log("Server stopped")
 	return nil
 }
@@ -136,18 +165,23 @@ func (s *Server) Stop() error {
 // ForceStop immediately stops the server without waiting for connections
 func (s *Server) ForceStop() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return fmt.Errorf("server is not running")
 	}
-
-	// Close all browser processes in the pool
-	s.rendererPool.Close()
+	server := s.server
+	pool := s.rendererPool
+	s.mu.Unlock()
 
 	// Force close immediately
-	err := s.server.Close()
-	s.running = false
+	err := server.Close()
+	_ = pool.Close()
+	s.mu.Lock()
+	if s.server == server {
+		s.running = false
+		s.server = nil
+	}
+	s.mu.Unlock()
 	s.log("Server force stopped")
 	return err
 }
@@ -578,7 +612,7 @@ func (s *Server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update links to go through proxy (for standard proxy, links should work as-is)
-	simplifiedHTML = s.rewriteLinksForProxy(simplifiedHTML, parsedURL)
+	simplifiedHTML = s.rewriteLinksForProxy(simplifiedHTML, parsedURL, isModern)
 
 	// Inject debug toolbar if debug mode is enabled
 	if s.IsDebugMode() {
@@ -778,7 +812,7 @@ func (s *Server) handleDebugView(w http.ResponseWriter, r *http.Request) {
 		// Choose Simplifier based on mode
 		var simplifier Simplifier
 		switch mode {
-		case "html4":
+		case "4.01":
 			simplifier = NewSimplifier401()
 		case "text":
 			simplifier = NewSimplifierText()
@@ -1251,7 +1285,7 @@ func (s *Server) fetchDirect(targetURL string) (string, error) {
 
 // rewriteLinksForProxy modifies links to work with proxy
 // For standard HTTP proxy, absolute URLs work automatically
-func (s *Server) rewriteLinksForProxy(htmlContent string, baseURL *url.URL) string {
+func (s *Server) rewriteLinksForProxy(htmlContent string, baseURL *url.URL, injectImageFixer bool) string {
 	// Use Tokenizer to rewrite URLs without parsing the whole DOM tree (preserves scripts/styles best)
 	z := xhtml.NewTokenizer(strings.NewReader(htmlContent))
 	var sb strings.Builder
@@ -1302,7 +1336,7 @@ drpFixImages();
 		token := z.Token()
 
 		// Inject script at start of body
-		if !scriptInjected && tt == xhtml.StartTagToken && strings.EqualFold(token.Data, "body") {
+		if injectImageFixer && !scriptInjected && tt == xhtml.StartTagToken && strings.EqualFold(token.Data, "body") {
 			sb.WriteString(token.String())
 			sb.WriteString(imageFixerScript)
 			scriptInjected = true

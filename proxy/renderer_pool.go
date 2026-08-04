@@ -145,6 +145,15 @@ func (p *RendererPool) IsBusy() bool {
 	return len(p.renderers) == 0
 }
 
+// IsClosed reports whether the pool can no longer accept rendering work.
+// A closed pool cannot be reopened; the server must create a new pool when it
+// is started again.
+func (p *RendererPool) IsClosed() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.closed
+}
+
 // Close closes all renderers in the pool
 func (p *RendererPool) Close() error {
 	p.mu.Lock()
