@@ -100,5 +100,5 @@ GOOS=linux wails3 build
 echo ""
 echo "============================================"
 echo "  Linux Build completed successfully!"
-echo "  Output: bin/RetroProxy"
+echo "  Output: bin/DKST RetroProxy"
 echo "============================================"

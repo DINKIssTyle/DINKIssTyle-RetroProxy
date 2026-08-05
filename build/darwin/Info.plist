@@ -3,7 +3,7 @@
 <plist version="1.0">
 	<dict>
 		<key>CFBundleExecutable</key>
-		<string>RetroProxy</string>
+		<string>DKST RetroProxy</string>
 		<key>CFBundleGetInfoString</key>
 		<string>DKST RetroProxy</string>
 		<key>CFBundleIconFile</key>

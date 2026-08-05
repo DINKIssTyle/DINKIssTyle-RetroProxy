@@ -137,8 +137,8 @@ echo ""
 echo "============================================"
 echo "  Build completed successfully!"
 if [ "$PLATFORM" = "macOS" ]; then
-    echo "  Output: bin/RetroProxy"
+    echo "  Output: bin/DKST RetroProxy.app"
 else
-    echo "  Output: bin/RetroProxy"
+    echo "  Output: bin/DKST RetroProxy"
 fi
 echo "============================================"

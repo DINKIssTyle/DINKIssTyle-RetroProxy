@@ -78,6 +78,6 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo ============================================
 echo   Build completed successfully!
-echo   Output: bin\RetroProxy.exe
+echo   Output: bin\DKST RetroProxy.exe
 echo ============================================
 pause

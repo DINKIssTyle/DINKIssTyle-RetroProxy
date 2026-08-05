@@ -14,8 +14,8 @@
     "layoutTemplate" : "template2",
     "notarize" : true,
     "signDiskImage" : true,
-    "signingIdentity" : "",
-    "volumeName" : "RetroProxy",
+    "signingIdentity" : "Developer ID Application: Nomin Park (QQ3GJ5KGP2)",
+    "volumeName" : "DKST RetroProxy",
     "windowHeight" : 447,
     "windowWidth" : 620
   },
@@ -43,5 +43,5 @@
   },
   "installerIdentity" : "Developer ID Installer: Nomin Park (QQ3GJ5KGP2)",
   "signInstaller" : false,
-  "targetRelativePath" : "Documents\/GitHub\/DINKIssTyle-RetroProxy\/bin\/RetroProxy.app"
+  "targetRelativePath" : "Documents\/GitHub\/DINKIssTyle-RetroProxy\/bin\/DKST RetroProxy.app"
 }

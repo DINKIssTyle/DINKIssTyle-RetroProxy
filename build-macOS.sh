@@ -76,5 +76,5 @@ wails3 package
 echo ""
 echo "============================================"
 echo "  macOS Build completed successfully!"
-echo "  Output: bin/RetroProxy.app"
+echo "  Output: bin/DKST RetroProxy.app"
 echo "============================================"
