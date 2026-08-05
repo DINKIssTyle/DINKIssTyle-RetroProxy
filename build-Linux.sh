@@ -57,17 +57,14 @@ NODE_VERSION=$(node --version)
 echo "       Found Node.js $NODE_VERSION"
 
 # 3. Check Linux GUI Development Dependencies
-echo "[3/5] Checking Linux GTK/WebKit dependencies..."
+echo "[3/5] Checking Linux GTK4 / WebKitGTK 6.0 dependencies..."
 if command_exists apt-get; then
-    if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
-        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential
-    else
-        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev build-essential
-    fi
+    sudo apt-get update
+    sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev build-essential pkg-config
 elif command_exists dnf; then
-    sudo dnf install -y gtk3-devel webkit2gtk3-devel gcc gcc-c++ make
+    sudo dnf install -y gtk4-devel webkitgtk6.0-devel gcc gcc-c++ make pkgconfig
 elif command_exists pacman; then
-    sudo pacman -S --noconfirm gtk3 webkit2gtk base-devel
+    sudo pacman -S --noconfirm gtk4 webkitgtk-6.0 base-devel pkgconf
 fi
 echo "       Linux dependencies satisfied."
 

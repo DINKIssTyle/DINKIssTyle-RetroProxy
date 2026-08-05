@@ -97,23 +97,16 @@ else
 fi
 
 # Check Wails dependencies (Linux only)
-WEBKIT_VERSION=""
 if [ "$PLATFORM" = "Linux" ]; then
     echo ""
-    echo "Checking Linux dependencies for Wails..."
+    echo "Checking Linux dependencies for Wails (GTK4 & WebKitGTK 6.0)..."
     if command_exists apt-get; then
-        # Try 4.1 first (Ubuntu 22.04+), fallback to 4.0
-        if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
-            sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-            WEBKIT_VERSION="4.1"
-        else
-            sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
-            WEBKIT_VERSION="4.0"
-        fi
+        sudo apt-get update
+        sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev build-essential pkg-config
     elif command_exists dnf; then
-        sudo dnf install -y gtk3-devel webkit2gtk3-devel
+        sudo dnf install -y gtk4-devel webkitgtk6.0-devel gcc gcc-c++ make pkgconfig
     elif command_exists pacman; then
-        sudo pacman -S --noconfirm gtk3 webkit2gtk
+        sudo pacman -S --noconfirm gtk4 webkitgtk-6.0 base-devel pkgconf
     fi
 fi
 
