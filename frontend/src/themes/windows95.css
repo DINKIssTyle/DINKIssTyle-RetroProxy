@@ -1,0 +1,6 @@
+/* Windows 95 default appearance. Add OS-specific overrides below the imports. */
+@import 'classic-stylesheets/layout.css';
+@import 'classic-stylesheets/themes/win9x/theme.css';
+@import 'classic-stylesheets/themes/win9x/skins/95.css';
+@import './shared/classic-app.css';
+@import './shared/modern-windows-titlebar.css';

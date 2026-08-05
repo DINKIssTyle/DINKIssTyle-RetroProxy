@@ -1,0 +1,18 @@
+/* Windows 95 and later place Maximize and Close at the right edge. */
+.win-minimize-control {
+    display: flex;
+}
+
+.app-titlebar > .title-bar-text {
+    order: 1;
+}
+
+.app-titlebar > .title-bar-buttons:last-child {
+    order: 2;
+    padding-right: 0;
+}
+
+.app-titlebar > .title-bar-buttons:first-child {
+    order: 3;
+    padding-left: 0;
+}

@@ -104,10 +104,10 @@ func main() {
 
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "DKST RetroProxy",
-		Width:            600,
-		Height:           650,
-		MinWidth:         430,
-		MinHeight:        520,
+		Width:            300,
+		Height:           325,
+		MinWidth:         215,
+		MinHeight:        260,
 		Frameless:        true,
 		BackgroundColour: application.NewRGBA(255, 255, 255, 255),
 		URL:              "/",

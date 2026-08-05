@@ -1,11 +1,23 @@
+:root {
+    --ui-scale: 0.8;
+}
+
 html,
-body,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    border-radius: 0;
+}
+
 #app {
     width: 100%;
     height: 100%;
     margin: 0;
     overflow: hidden;
     border-radius: 0;
+    zoom: var(--ui-scale);
 }
 
 body,

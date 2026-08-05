@@ -93,9 +93,7 @@ func (s *Server) Start(port int) error {
 
 	// RendererPool.Close is intentionally permanent. Stop closes the browser
 	// processes, so every subsequent start needs a fresh pool.
-	if s.rendererPool == nil || s.rendererPool.IsClosed() {
-		s.rendererPool = NewRendererPool(3)
-	}
+	_ = s.getRendererPoolLocked()
 
 	actualPort := port
 	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok {
@@ -1400,12 +1398,34 @@ func (s *Server) resolveURL(href string, base *url.URL) string {
 	return base.ResolveReference(u).String()
 }
 
+// getRendererPool returns the active renderer pool, creating a new one if nil or closed
+func (s *Server) getRendererPool() *RendererPool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.getRendererPoolLocked()
+}
+
+// getRendererPoolLocked returns the active renderer pool assuming s.mu is locked
+func (s *Server) getRendererPoolLocked() *RendererPool {
+	if s.rendererPool == nil || s.rendererPool.IsClosed() {
+		s.rendererPool = NewRendererPool(3)
+	}
+	return s.rendererPool
+}
+
 // Close cleans up resources
 func (s *Server) Close() error {
 	if s.IsRunning() {
 		s.Stop()
 	}
-	return s.rendererPool.Close()
+	s.mu.Lock()
+	pool := s.rendererPool
+	s.mu.Unlock()
+	if pool != nil {
+		return pool.Close()
+	}
+	return nil
 }
 
 // renderImageMode captures screenshot, slices it, and returns HTML with image map

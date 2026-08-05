@@ -1,0 +1,6 @@
+/* Windows XP Blue (Luna) appearance. Add OS-specific overrides below the imports. */
+@import 'classic-stylesheets/layout.css';
+@import 'classic-stylesheets/themes/winxp/theme.css';
+@import 'classic-stylesheets/themes/winxp/skins/default.css';
+@import './shared/classic-app.css';
+@import './shared/modern-windows-titlebar.css';

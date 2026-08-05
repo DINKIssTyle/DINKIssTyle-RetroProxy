@@ -1,10 +1,11 @@
 import './base.css';
-import systemCss from '@sakun/system.css/dist/system.css?inline';
-import classicLayoutCss from 'classic-stylesheets/layout.css?inline';
-import win31ThemeCss from 'classic-stylesheets/themes/win3x/theme.css?inline';
-import win31SkinCss from 'classic-stylesheets/themes/win3x/skins/3.1.css?inline';
-import macintoshAppCss from './style.css?inline';
-import windows31AppCss from './windows31.css?inline';
+import macintoshThemeCss from './themes/macintosh.css?inline';
+import macOS9ThemeCss from './themes/macos9.css?inline';
+import windows31ThemeCss from './themes/windows31.css?inline';
+import windows95ThemeCss from './themes/windows95.css?inline';
+import windows98ThemeCss from './themes/windows98.css?inline';
+import windows2000ThemeCss from './themes/windows2000.css?inline';
+import windowsXPBlueThemeCss from './themes/windows-xp-blue.css?inline';
 import { Browser, Window } from '@wailsio/runtime';
 import { App } from '../bindings/oldwebproxy';
 
@@ -20,19 +21,45 @@ const {
 const themes = {
     macintosh: {
         label: 'Macintosh',
-        css: `${systemCss}\n${macintoshAppCss}`,
+        css: macintoshThemeCss,
     },
     win31: {
         label: 'Windows 3.1',
-        css: `${classicLayoutCss}\n${win31ThemeCss}\n${win31SkinCss}\n${windows31AppCss}`,
+        css: windows31ThemeCss,
+    },
+    macos9: {
+        label: 'Mac OS 9',
+        css: macOS9ThemeCss,
+    },
+    win95: {
+        label: 'Windows 95',
+        css: windows95ThemeCss,
+    },
+    win98: {
+        label: 'Windows 98',
+        css: windows98ThemeCss,
+    },
+    win2000: {
+        label: 'Windows 2000',
+        css: windows2000ThemeCss,
+    },
+    winxp: {
+        label: 'Windows XP Blue',
+        css: windowsXPBlueThemeCss,
     },
 };
 
-const themeModes = ['random', 'macintosh', 'win31'];
+const availableThemeNames = Object.keys(themes);
+const themeModes = ['random', ...availableThemeNames];
 const themeModeLabels = {
     random: 'Random',
     macintosh: 'Macintosh',
-    win31: 'Windows',
+    win31: 'Windows 3.1',
+    macos9: 'Mac OS 9',
+    win95: 'Windows 95',
+    win98: 'Windows 98',
+    win2000: 'Windows 2000',
+    winxp: 'Windows XP Blue',
 };
 const savedThemeMode = localStorage.getItem('retroproxy-theme-mode');
 let currentThemeMode = themeModes.includes(savedThemeMode) ? savedThemeMode : 'random';
@@ -53,6 +80,7 @@ document.querySelector('#app').innerHTML = `
                 <h1 class="title title-bar-text">DKST RetroProxy</h1>
                 <button class="resize window-control mac-title-control" id="zoomWindowBtn" aria-label="Zoom window"><span>Zoom</span></button>
                 <div class="title-bar-buttons win-title-controls">
+                    <button class="window-control win-minimize-control" id="winMinimizeWindowBtn" data-minimize aria-label="Minimize window"></button>
                     <button class="window-control" id="winZoomWindowBtn" data-maximize aria-label="Maximize window"></button>
                 </div>
             </div>
@@ -165,6 +193,7 @@ const debugUrlContainer = document.getElementById('debugUrlContainer');
 const closeWindowBtn = document.getElementById('closeWindowBtn');
 const zoomWindowBtn = document.getElementById('zoomWindowBtn');
 const winCloseWindowBtn = document.getElementById('winCloseWindowBtn');
+const winMinimizeWindowBtn = document.getElementById('winMinimizeWindowBtn');
 const winZoomWindowBtn = document.getElementById('winZoomWindowBtn');
 const windowTitlebar = document.getElementById('windowTitlebar');
 const themeToggleBtn = document.getElementById('themeToggleBtn');
@@ -216,6 +245,7 @@ copyDebugBtn.addEventListener('click', () => {
 closeWindowBtn.addEventListener('click', () => Window.Close());
 zoomWindowBtn.addEventListener('click', () => Window.ToggleMaximise());
 winCloseWindowBtn.addEventListener('click', () => Window.Close());
+winMinimizeWindowBtn.addEventListener('click', () => Window.Minimise());
 winZoomWindowBtn.addEventListener('click', () => Window.ToggleMaximise());
 themeToggleBtn.addEventListener('click', toggleTheme);
 launchAtStartupInput.addEventListener('change', updateLaunchAtStartup);
@@ -319,7 +349,7 @@ function toggleTheme() {
 
 function resolveTheme(themeMode) {
     if (themeMode === 'random') {
-        return Math.random() < 0.5 ? 'macintosh' : 'win31';
+        return availableThemeNames[Math.floor(Math.random() * availableThemeNames.length)];
     }
     return themeMode;
 }

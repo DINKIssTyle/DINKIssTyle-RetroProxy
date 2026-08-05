@@ -1,0 +1,322 @@
+/* Original Macintosh theme with RetroProxy-specific layout overrides. */
+@import '@sakun/system.css/dist/system.css';
+
+:root {
+    color: #000;
+    background: #fff;
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    font-size: 18px;
+    letter-spacing: -0.025em;
+    font-synthesis: none;
+
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background: #fff;
+}
+
+.app-desktop {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+}
+
+.app-window.window {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 360px;
+    margin: 0;
+    box-shadow: none;
+}
+
+.win-title-controls {
+    display: none;
+}
+
+.app-pane.window-pane {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.proxy-state {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    font-family: Chicago_12, Chicago, sans-serif;
+}
+
+.app-details-bar {
+    justify-content: flex-end;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border: 1px solid #000;
+    background: #fff;
+}
+
+.status-dot.stopped {
+    background: repeating-linear-gradient(45deg, #fff 0 2px, #777 2px 3px);
+}
+
+.status-dot.running {
+    background: #000;
+    animation: status-blink 1.2s steps(1) infinite;
+}
+
+@keyframes status-blink {
+    50% {
+        background: #fff;
+    }
+}
+
+.control-panel {
+    margin: 0;
+    padding: 10px 13px 12px;
+    border: 2px solid #000;
+}
+
+.control-panel legend {
+    padding: 0 7px;
+    background: #fff;
+    font-family: Chicago_12, Chicago, sans-serif;
+    font-size: 18px;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px 18px;
+}
+
+.settings-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.settings-row>span,
+.debug-row>span {
+    font-family: Chicago_12, Chicago, sans-serif;
+    font-size: 18px;
+    text-align: right;
+}
+
+.settings-row input,
+.settings-row select,
+.settings-row .theme-dropdown {
+    width: 100%;
+    min-width: 0;
+}
+
+.settings-row .theme-dropdown {
+    display: grid;
+}
+
+.settings-row .dropdown-button {
+    display: none;
+}
+
+.settings-row select {
+    padding-left: 5px;
+    padding-right: 28px;
+}
+
+button:focus-visible,
+a:focus-visible {
+    outline: 2px dotted #000;
+    outline-offset: 2px;
+}
+
+.debug-row {
+    display: grid;
+    grid-template-columns: 92px 70px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px dotted #000;
+}
+
+.btn.compact-btn {
+    min-width: 59px;
+}
+
+.debug-url {
+    display: none;
+    align-items: center;
+    min-width: 0;
+    height: 27px;
+    border: 1px solid #000;
+    background: #fff;
+}
+
+.debug-url a {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    overflow: hidden;
+    color: #000;
+    font-family: Monaco, monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.copy-button {
+    align-self: stretch;
+    padding: 0 7px;
+    border: 0;
+    border-left: 1px solid #000;
+    background: #fff;
+    color: #000;
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    cursor: pointer;
+}
+
+.copy-button:active {
+    background: #000;
+    color: #fff;
+}
+
+.button-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 48px;
+    margin-top: 9px;
+}
+
+.button-row .btn {
+    min-width: 59px;
+}
+
+.log-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 132px;
+    margin-top: 11px;
+    border: 2px solid #000;
+}
+
+.log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 31px;
+    padding: 2px 5px 2px 10px;
+    border-bottom: 1px solid #000;
+    background: repeating-linear-gradient(45deg, #fff 0 3px, #ddd 3px 4px);
+}
+
+.log-header h2 {
+    margin: 0;
+    padding: 1px 7px;
+    background: #fff;
+    font-family: Chicago_12, Chicago, sans-serif;
+    font-size: 18px;
+}
+
+.log-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.log-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 7px 9px;
+    overflow-y: scroll;
+    background: #fff;
+    font-family: Monaco, monospace;
+    font-size: 18px;
+    line-height: 1.3;
+}
+
+.activity-scrollbar {
+    display: none;
+}
+
+.log-entry {
+    padding: 1px 0;
+    word-break: break-word;
+}
+
+.log-entry:nth-child(even) {
+    background: #eee;
+}
+
+.log-empty {
+    padding-top: 16px;
+    color: #555;
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    text-align: center;
+}
+
+.footer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 auto;
+    padding: 6px 2px 0;
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    font-size: 18px;
+}
+
+.footer-bar>span:last-child {
+    font-family: Chicago_12, Chicago, sans-serif;
+}
+
+.startup-option {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.startup-option label {
+    font-family: Geneva_9, Geneva, Arial, sans-serif;
+    font-size: 18px;
+}
+
+.theme-toggle {
+    min-width: 0;
+    padding-right: 8px;
+    padding-left: 8px;
+    font-family: Chicago_12, Chicago, sans-serif;
+}
+
+@media (max-width: 470px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
+        gap: 7px;
+    }
+
+}
+
+@media (max-height: 610px) {
+    .control-panel {
+        padding-top: 7px;
+        padding-bottom: 8px;
+    }
+
+    .log-panel {
+        margin-top: 7px;
+        min-height: 94px;
+    }
+}

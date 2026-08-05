@@ -1,0 +1,29 @@
+/* Mac OS 9 default appearance. Add OS-specific overrides below the imports. */
+@import 'classic-stylesheets/layout.css';
+@import 'classic-stylesheets/themes/macos9/theme.css';
+@import 'classic-stylesheets/themes/macos9/skins/default.css';
+@import './shared/classic-app.css';
+
+/* Mac OS 9 groups Minimize, Maximize, and Close at the right edge. */
+.win-minimize-control {
+    display: flex;
+}
+
+.app-titlebar > .title-bar-text {
+    order: 1;
+}
+
+.app-titlebar > .title-bar-buttons:last-child {
+    order: 2;
+    margin-left: auto;
+}
+
+.app-titlebar > .title-bar-buttons:first-child {
+    order: 3;
+    margin-left: 0;
+}
+
+/* Restore the vertical-scrollbar grid supplied by the Mac OS 9 theme. */
+.activity-scrollbar.vertical-scrollbar {
+    display: grid;
+}
