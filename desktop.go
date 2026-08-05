@@ -19,8 +19,20 @@ func (a *App) configureDesktop(window application.Window, macIcon, linuxIcon, wi
 	// tray menu instead.
 	if runtime.GOOS != "linux" {
 		applicationMenu := a.application.NewMenu()
+		applicationMenu.AddRole(application.AppMenu)
+
+		fileMenu := applicationMenu.AddSubmenu("File")
+		fileMenu.Add("Close Window").SetAccelerator("CmdOrCtrl+w").OnClick(func(_ *application.Context) {
+			a.mainWindow.Hide()
+		})
+
+		applicationMenu.AddRole(application.EditMenu)
+
 		serverMenu := applicationMenu.AddSubmenu("Server")
 		a.populateServerMenu(serverMenu)
+
+		applicationMenu.AddRole(application.WindowMenu)
+
 		a.application.Menu.SetApplicationMenu(applicationMenu)
 	}
 
