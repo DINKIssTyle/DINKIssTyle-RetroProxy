@@ -17,3 +17,4 @@ The `shared` directory contains only rules reused by multiple entry themes:
 
 - `classic-app.css`: RetroProxy layout for themes from `classic-stylesheets`.
 - `modern-windows-titlebar.css`: right-aligned window controls for Windows 95 and later.
+- `win9x-select-focus.css`: neutral closed selects with selection colors only on focus.

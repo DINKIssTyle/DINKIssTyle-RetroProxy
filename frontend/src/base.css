@@ -1,5 +1,5 @@
 :root {
-    --ui-scale: 0.8;
+    --ui-scale: 1.0;
 }
 
 html,
@@ -48,6 +48,14 @@ a {
 .app-desktop,
 .app-window {
     border-radius: 0;
+}
+
+.app-window-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .app-titlebar .title,

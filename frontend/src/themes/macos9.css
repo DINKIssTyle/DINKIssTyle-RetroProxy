@@ -4,6 +4,12 @@
 @import 'classic-stylesheets/themes/macos9/skins/default.css';
 @import './shared/classic-app.css';
 
+/* Keep the original frame shadow inside the frameless WebView viewport. */
+.app-window.window {
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+}
+
 /* Mac OS 9 groups Minimize, Maximize, and Close at the right edge. */
 .win-minimize-control {
     display: flex;

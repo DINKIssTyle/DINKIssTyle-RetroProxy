@@ -4,3 +4,4 @@
 @import 'classic-stylesheets/themes/win9x/skins/2000.css';
 @import './shared/classic-app.css';
 @import './shared/modern-windows-titlebar.css';
+@import './shared/win9x-select-focus.css';

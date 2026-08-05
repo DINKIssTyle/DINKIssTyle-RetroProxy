@@ -13,6 +13,14 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
+)
+
+// The reference screenshot was captured on a 2x Retina display. Its
+// 1036x1062 physical-pixel frame corresponds to 518x531 logical pixels.
+const (
+	mainWindowWidth  = 518
+	mainWindowHeight = 531
 )
 
 // Replace these platform-specific placeholders with final tray artwork while
@@ -97,17 +105,17 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
+			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
 	appService.application = app
 
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "DKST RetroProxy",
-		Width:            300,
-		Height:           325,
-		MinWidth:         215,
-		MinHeight:        260,
+		Width:            mainWindowWidth,
+		Height:           mainWindowHeight,
+		MinWidth:         mainWindowWidth,
+		MinHeight:        mainWindowHeight,
 		Frameless:        true,
 		BackgroundColour: application.NewRGBA(255, 255, 255, 255),
 		URL:              "/",
@@ -118,6 +126,10 @@ func main() {
 			NonClientRegionSupport:            true,
 			DisableFramelessWindowDecorations: true,
 		},
+	})
+	mainWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		mainWindow.Hide()
 	})
 	appService.configureDesktop(mainWindow, trayIconDarwinPNG, trayIconLinuxPNG, trayIconWindowsICO)
 

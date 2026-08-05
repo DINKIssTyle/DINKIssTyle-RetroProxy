@@ -53,7 +53,7 @@ const availableThemeNames = Object.keys(themes);
 const themeModes = ['random', ...availableThemeNames];
 const themeModeLabels = {
     random: 'Random',
-    macintosh: 'Macintosh',
+    macintosh: 'System 7',
     win31: 'Windows 3.1',
     macos9: 'Mac OS 9',
     win95: 'Windows 95',
@@ -85,14 +85,15 @@ document.querySelector('#app').innerHTML = `
                 </div>
             </div>
 
-            <div class="details-bar app-details-bar">
-                <span class="proxy-state">
-                    <span class="status-dot stopped" id="statusDot" aria-hidden="true"></span>
-                    <span class="status-text" id="statusText">Stopped</span>
-                </span>
-            </div>
+            <div class="window-body app-window-body">
+                <div class="details-bar app-details-bar">
+                    <span class="proxy-state">
+                        <span class="status-dot stopped" id="statusDot" aria-hidden="true"></span>
+                        <span class="status-text" id="statusText">Stopped</span>
+                    </span>
+                </div>
 
-            <div class="window-pane window-body app-pane">
+                <div class="window-pane app-pane">
                 <fieldset class="control-panel">
                     <legend>Proxy Control</legend>
                     <div class="settings-grid">
@@ -122,6 +123,11 @@ document.querySelector('#app').innerHTML = `
                             </span>
                         </label>
                     </div>
+                    <div class="button-row">
+                        <button class="btn btn-default mac-start-control" id="startBtn">Start</button>
+                        <div class="button primary classic-start-control" id="classicStartBtn" role="button" tabindex="0">Start</div>
+                        <button class="btn" id="stopBtn" disabled>Stop</button>
+                    </div>
 
                     <div class="debug-row">
                         <span>Debug:</span>
@@ -132,10 +138,7 @@ document.querySelector('#app').innerHTML = `
                         </div>
                     </div>
 
-                    <div class="button-row">
-                        <button class="btn btn-default" id="startBtn">Start</button>
-                        <button class="btn" id="stopBtn" disabled>Stop</button>
-                    </div>
+
                 </fieldset>
 
                 <section class="log-panel" aria-labelledby="logTitle">
@@ -157,14 +160,15 @@ document.querySelector('#app').innerHTML = `
                     </div>
                 </section>
 
-                <footer class="footer-bar">
-                    <span class="startup-option">
-                        <input type="checkbox" id="launchAtStartupInput" />
-                        <label for="launchAtStartupInput">Launch at startup</label>
-                    </span>
-                    <button class="btn theme-toggle" id="themeToggleBtn" type="button"></button>
-                    <span>© 2026 DINKI'ssTyle</span>
-                </footer>
+                    <footer class="footer-bar">
+                        <span class="startup-option">
+                            <input type="checkbox" id="launchAtStartupInput" />
+                            <label for="launchAtStartupInput">Launch at startup</label>
+                        </span>
+                        <button class="btn theme-toggle" id="themeToggleBtn" type="button"></button>
+                        <span>© 2026 DINKI'ssTyle</span>
+                    </footer>
+                </div>
             </div>
         </section>
     </main>
@@ -173,6 +177,7 @@ document.querySelector('#app').innerHTML = `
 // Get elements
 const portInput = document.getElementById('portNumber');
 const startBtn = document.getElementById('startBtn');
+const classicStartBtn = document.getElementById('classicStartBtn');
 const stopBtn = document.getElementById('stopBtn');
 const clearBtn = document.getElementById('clearBtn');
 const debugBtn = document.getElementById('debugBtn');
@@ -204,6 +209,8 @@ applyTheme(currentTheme);
 
 // Event listeners
 startBtn.addEventListener('click', startProxy);
+classicStartBtn.addEventListener('click', startProxyFromClassicControl);
+classicStartBtn.addEventListener('keydown', startProxyFromClassicControl);
 stopBtn.addEventListener('click', stopProxy);
 clearBtn.addEventListener('click', clearLogs);
 debugBtn.addEventListener('click', toggleDebug);
@@ -242,9 +249,9 @@ copyDebugBtn.addEventListener('click', () => {
     });
 });
 
-closeWindowBtn.addEventListener('click', () => Window.Close());
+closeWindowBtn.addEventListener('click', () => Window.Hide());
 zoomWindowBtn.addEventListener('click', () => Window.ToggleMaximise());
-winCloseWindowBtn.addEventListener('click', () => Window.Close());
+winCloseWindowBtn.addEventListener('click', () => Window.Hide());
 winMinimizeWindowBtn.addEventListener('click', () => Window.Minimise());
 winZoomWindowBtn.addEventListener('click', () => Window.ToggleMaximise());
 themeToggleBtn.addEventListener('click', toggleTheme);
@@ -517,7 +524,7 @@ async function startProxy() {
         addLog('[ERROR] Invalid port');
         return;
     }
-    startBtn.disabled = true;
+    setStartDisabled(true);
     addLog('[PROXY] Starting...');
     try {
         const result = await StartProxy(port);
@@ -525,8 +532,22 @@ async function startProxy() {
         await updateStatus();
     } catch (err) {
         addLog('[ERROR] ' + err);
-        startBtn.disabled = false;
+        setStartDisabled(false);
     }
+}
+
+function startProxyFromClassicControl(event) {
+    if (classicStartBtn.classList.contains('disabled')) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.type === 'keydown') event.preventDefault();
+    startProxy();
+}
+
+function setStartDisabled(disabled) {
+    startBtn.disabled = disabled;
+    classicStartBtn.classList.toggle('disabled', disabled);
+    classicStartBtn.setAttribute('aria-disabled', String(disabled));
+    classicStartBtn.tabIndex = disabled ? -1 : 0;
 }
 
 async function stopProxy() {
@@ -605,7 +626,7 @@ async function updateStatus() {
         if (status.running) {
             statusDot.className = 'status-dot running';
             statusText.textContent = `Running on port ${status.port}`;
-            startBtn.disabled = true;
+            setStartDisabled(true);
             stopBtn.disabled = false;
             portInput.disabled = true;
 
@@ -621,7 +642,7 @@ async function updateStatus() {
         } else {
             statusDot.className = 'status-dot stopped';
             statusText.textContent = 'Stopped';
-            startBtn.disabled = false;
+            setStartDisabled(false);
             stopBtn.disabled = true;
             portInput.disabled = false;
             debugUrlContainer.style.display = 'none';

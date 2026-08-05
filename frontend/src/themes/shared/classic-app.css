@@ -55,8 +55,8 @@ body {
     align-items: center;
     justify-content: flex-end;
     padding: 3px 8px;
-    border: 1px solid var(--app-border);
-    border-top: 0;
+    border: 0;
+    border-bottom: 1px solid var(--app-border);
     background: var(--window-bg);
 }
 
@@ -86,7 +86,7 @@ body {
     50% { background: var(--window-bg); }
 }
 
-.app-pane.window-body {
+.app-pane.window-pane {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
@@ -113,7 +113,7 @@ body {
 
 .settings-row {
     display: grid;
-    grid-template-columns: 66px minmax(0, 1fr);
+    grid-template-columns: 74px minmax(0, 1fr);
     align-items: center;
     gap: 6px;
     min-width: 0;
@@ -183,7 +183,12 @@ body {
     margin-top: 9px;
 }
 
-.button-row button {
+.mac-start-control {
+    display: none !important;
+}
+
+.button-row button,
+.button-row .button {
     width: 100px;
     height: 28px;
 }

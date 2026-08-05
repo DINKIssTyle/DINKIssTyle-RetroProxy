@@ -205,6 +205,10 @@ a:focus-visible {
     min-width: 59px;
 }
 
+.classic-start-control {
+    display: none;
+}
+
 .log-panel {
     display: flex;
     flex: 1 1 auto;

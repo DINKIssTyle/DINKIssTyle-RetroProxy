@@ -1,0 +1,11 @@
+/* Keep closed Win9x selects neutral until they actually receive focus. */
+select:not([size], [multiple]) {
+    background-color: var(--input-bg);
+    color: var(--input-fg);
+}
+
+select:not([size], [multiple]):not(:active):focus,
+select[size="1"]:not(:active):focus {
+    background-color: var(--selection-bg);
+    color: var(--selection-fg);
+}
