@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	desktopos "oldwebproxy/internal/os"
 	"runtime"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -23,7 +24,19 @@ func (a *App) configureDesktop(window application.Window, macIcon, linuxIcon, wi
 		a.application.Menu.SetApplicationMenu(applicationMenu)
 	}
 
-	a.configurePlatformTray(macIcon, linuxIcon, windowsIcon)
+	cb := desktopos.TrayCallbacks{
+		OnToggleServer: func() {
+			a.toggleServerFromMenu()
+		},
+		OnShowMainWindow: func() {
+			a.ShowMainWindow()
+		},
+		OnQuit: func() {
+			a.application.Quit()
+		},
+	}
+
+	desktopos.ConfigurePlatformTray(a.application, a.populateServerMenu, cb, macIcon, linuxIcon, windowsIcon)
 
 	a.updateServerMenus()
 }
@@ -72,7 +85,7 @@ func (a *App) updateServerMenus() {
 	for _, item := range a.toggleItems {
 		item.SetLabel(toggleLabel)
 	}
-	a.updatePlatformTray(running, port)
+	desktopos.UpdatePlatformTray(running, port)
 }
 
 // ShowMainWindow restores the main application window from the taskbar, Dock,

@@ -5,7 +5,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"oldwebproxy/proxy"
+	desktopos "oldwebproxy/internal/os"
+	"oldwebproxy/internal/proxy"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -27,7 +28,6 @@ type AppConfig struct {
 type App struct {
 	application *application.App
 	mainWindow  application.Window
-	systemTray  *application.SystemTray
 	server      *proxy.Server
 	logs        []string
 	logMu       sync.RWMutex
@@ -124,7 +124,7 @@ func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) er
 // ServiceShutdown is called by Wails when the application is closing.
 func (a *App) ServiceShutdown() error {
 	a.addLog("Application shutting down...")
-	a.destroyPlatformTray()
+	desktopos.DestroyPlatformTray()
 	if a.server != nil {
 		a.server.Close()
 	}
